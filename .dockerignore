@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.env
+.env.local
+.netlify
+.pg-runtime-config.json
+*.log
+Dockerfile
+.dockerignore
+README.md
