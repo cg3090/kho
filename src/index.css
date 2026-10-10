@@ -1,0 +1,193 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Re-mapping Slate/Gray variables to Soft Dark Gray palette */
+  --color-slate-950: #121316; /* Main background - Xám tối dịu mắt */
+  --color-slate-900: #181a1f; /* Card / Sidebar background */
+  --color-slate-800: #22252c; /* Input / Hover / Secondary background */
+  --color-slate-700: #313540; /* Border / Divider */
+
+  /* Ánh xạ toàn bộ thang emerald sang màu chủ đạo do người dùng chọn trong
+     Cấu hình > Cài đặt nghiệp vụ (src/utils/theme.ts ghi đè các biến này lên :root) */
+  --color-emerald-300: var(--theme-color-lighter, #6ee7b7);
+  --color-emerald-400: var(--theme-color-light, #34d399);
+  --color-emerald-500: var(--theme-color, #10b981);
+  --color-emerald-600: var(--theme-color-hover, #059669);
+  --color-emerald-700: var(--theme-color-dark, #047857);
+  --color-emerald-800: var(--theme-color-strong, #065f46);
+  --color-emerald-900: var(--theme-color-deepest, #064e3b);
+  --color-emerald-950: var(--theme-color-deepest, #022c22);
+
+  --color-brand: var(--theme-color, #10b981);
+  --color-primary: var(--theme-color, #10b981);
+
+  /* Màu đồng hành cho gradient emerald→teal: xoay sắc độ 30° từ màu chủ đạo */
+  --color-teal-300: var(--theme-accent-lighter, #5eead4);
+  --color-teal-400: var(--theme-accent-light, #2dd4bf);
+  --color-teal-500: var(--theme-accent, #14b8a6);
+  --color-teal-600: var(--theme-accent-hover, #0d9488);
+}
+
+:root {
+  /* Giá trị mặc định khớp với dải màu sinh ra từ #10b981 để lần vẽ đầu tiên
+     (trước khi JS chạy) không nháy sang màu khác */
+  --theme-color: #10b981;
+  --theme-color-rgb: 16, 185, 129;
+  --theme-color-lighter: #6fe1bb;
+  --theme-color-light: #3ee0aa;
+  --theme-color-hover: #0d9367;
+  --theme-color-dark: #0a6e4d;
+  --theme-color-strong: #064832;
+  --theme-color-deepest: #031e15;
+
+  --theme-accent: #14b8a6;
+  --theme-accent-lighter: #5eead4;
+  --theme-accent-light: #2dd4bf;
+  --theme-accent-hover: #0d9488;
+
+  /* Ergonomic Dark Gray UI Color Palette */
+  --bg-app: #121316;        
+  --bg-surface: #181a1f;    
+  --bg-elevated: #22252c;   
+  --border-color: #2e323d;  
+  
+  --text-main: #e2e8f0;     
+  --text-muted: #94a3b8;    
+}
+
+/* Base Body Styles - Full viewport height & no horizontal page overflow */
+html {
+  height: 100%;
+}
+
+body {
+  height: 100%;
+  min-height: 100%;
+  width: 100%;
+  margin: 0;
+  overflow-x: hidden;
+  overscroll-behavior-y: none;
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  color-scheme: dark;
+}
+
+#root {
+  height: 100%;
+  min-height: 100%;
+  width: 100%;
+  isolation: isolate;
+}
+
+/* Long words / codes must never push the layout wider than the viewport */
+h1, h2, h3, h4, h5, h6, p, span, td, th, label, li, a, button {
+  overflow-wrap: break-word;
+}
+
+/* Tables inside responsive wrappers scroll instead of stretching the page */
+table {
+  border-collapse: collapse;
+}
+
+/* Custom styles for dark theme form elements */
+input, select, textarea {
+  color-scheme: dark;
+  background-color: var(--bg-elevated);
+  color: var(--text-main);
+  border-color: var(--border-color);
+}
+
+/* Custom scrollbars (Tối ưu tiệp màu Dark Gray) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-app);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Hide scrollbar entirely while keeping scroll (Sidebar / compact panels) */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* High Fidelity Standardized Printing for Vouchers (Circular 133/200) */
+@media print {
+  /* Reset body/html background to pure white for printing */
+  html, body {
+    background: #ffffff !important;
+    color: #141313 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Hide absolutely everything by default */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Display only the printable area and all of its inner elements */
+  .printable-area, .printable-area * {
+    visibility: visible !important;
+  }
+
+  /* Stretch the print sheet to occupy full print page with clean margins */
+  .printable-area {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    display: block !important;
+  }
+
+  /* Enforce exact print color rendering for table backgrounds/badges */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Ensure text is deep dark black for professional paper print output */
+  .printable-area p,
+  .printable-area span,
+  .printable-area div,
+  .printable-area td,
+  .printable-area th,
+  .printable-area h1,
+  .printable-area h2,
+  .printable-area h3,
+  .printable-area h4 {
+    color: #000000 !important;
+  }
+
+  /* Define professional margin configuration for standard A4 portrait sheets */
+  @page {
+    size: A4 portrait;
+    margin: 15mm !important;
+  }
+}

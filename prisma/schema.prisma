@@ -1,0 +1,528 @@
+// =================================================================================
+// PRISMA ORM SCHEMA - HỆ THỐNG ERP QUẢN TRỊ KHO (WMS) & KẾ TOÁN (TT 133/200)
+// Đồng bộ 100% với `database_setup.sql` (30 bảng PostgreSQL)
+// Hỗ trợ Khảo sát ngược Database (Introspection: `npx prisma db pull`)
+// & Sinh công cụ truy vấn Prisma Client (`npx prisma generate`)
+// =================================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 0. Bảng lưu trữ đồng bộ JSONB Collection State
+model ErpCollection {
+  key       String    @id @db.VarChar(100)
+  data      Json      @default("[]")
+  payload   Json      @default("[]")
+  updatedAt DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@map("erp_collections")
+}
+
+// 1. Tham số Cấu hình Hệ thống (Singleton id = 1)
+model SystemConfig {
+  id                   Int       @id @default(1)
+  allowNegativeStock   Boolean?  @default(false) @map("allow_negative_stock")
+  defaultVatRate       Decimal?  @default(10.00) @map("default_vat_rate") @db.Decimal(5, 2)
+  autoApproveQuotation Boolean?  @default(false) @map("auto_approve_quotation")
+  themeColor           String?   @default("#10b981") @map("theme_color") @db.VarChar(20)
+  updatedAt            DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@map("system_config")
+}
+
+// 2. Thông tin Pháp nhân Doanh nghiệp (Singleton id = 1)
+model CompanyInfo {
+  id          Int       @id @default(1)
+  name        String    @default("") @db.VarChar(255)
+  taxCode     String    @default("") @map("tax_code") @db.VarChar(50)
+  address     String    @default("")
+  bankAccount String    @default("") @map("bank_account") @db.VarChar(100)
+  bankName    String    @default("") @map("bank_name") @db.VarChar(255)
+  logoUrl     String?   @map("logo_url")
+  updatedAt   DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@map("company_info")
+}
+
+// 3. Quy tắc Đánh số Chứng từ Tự động
+model SequenceConfig {
+  type          String @id @db.VarChar(50)
+  prefix        String @db.VarChar(20)
+  digits        Int?   @default(4)
+  currentNumber Int?   @default(1) @map("current_number")
+
+  @@map("sequence_configs")
+}
+
+// 4. Mẫu in Chứng từ
+model PrintTemplate {
+  type       String @id @db.VarChar(50)
+  name       String @db.VarChar(100)
+  title      String @db.VarChar(255)
+  headerHtml String @map("header_html")
+  footerHtml String @map("footer_html")
+
+  @@map("print_templates")
+}
+
+// 5. Vai trò Phân quyền (RBAC Roles)
+model Role {
+  id          String   @id @db.VarChar(50)
+  name        String   @db.VarChar(100)
+  description String?
+  color       String?  @default("#10b981") @db.VarChar(20)
+  isSystem    Boolean? @default(false) @map("is_system")
+  permissions Json     @default("[]")
+  users       User[]
+
+  @@map("roles")
+}
+
+// 6. Tài khoản Người dùng (Users)
+model User {
+  id        String  @id @db.VarChar(50)
+  username  String  @unique @db.VarChar(100)
+  password  String  @db.VarChar(255)
+  fullName  String  @map("full_name") @db.VarChar(255)
+  email     String? @default("") @db.VarChar(255)
+  phone     String? @default("") @db.VarChar(50)
+  roleId    String? @map("role_id") @db.VarChar(50)
+  status    String? @default("ACTIVE") @db.VarChar(20)
+  avatarUrl String? @map("avatar_url")
+  createdAt String? @map("created_at") @db.VarChar(50)
+  lastLogin String? @map("last_login") @db.VarChar(100)
+  role      Role?   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@map("users")
+}
+
+// 7. Danh mục Nhóm hàng hóa
+model Category {
+  id          String    @id @db.VarChar(50)
+  name        String    @db.VarChar(255)
+  description String?
+  products    Product[]
+
+  @@map("categories")
+}
+
+// 8. Danh mục Đơn vị tính (UOM)
+model Uom {
+  id              String                   @id @db.VarChar(50)
+  name            String                   @db.VarChar(50)
+  productsBase    Product[]                @relation("ProductBaseUom")
+  productsAlt     Product[]                @relation("ProductAltUom")
+  stockTxDetails  StockTransactionDetail[]
+
+  @@map("uoms")
+}
+
+// 9. Danh mục Kho bãi
+model Warehouse {
+  id                String             @id @db.VarChar(50)
+  name              String             @db.VarChar(255)
+  location          String?
+  inventoryStocks   InventoryStock[]
+  stockTransactions StockTransaction[]
+
+  @@map("warehouses")
+}
+
+// 10. Danh mục Nhà cung cấp
+model Supplier {
+  id                String             @id @db.VarChar(50)
+  name              String             @db.VarChar(255)
+  taxCode           String             @default("") @map("tax_code") @db.VarChar(100)
+  phone             String?            @db.VarChar(50)
+  address           String?
+  stockTransactions StockTransaction[]
+
+  @@map("suppliers")
+}
+
+// 11. Danh mục Khách hàng
+model Customer {
+  id                String             @id @db.VarChar(50)
+  name              String             @db.VarChar(255)
+  taxCode           String             @default("") @map("tax_code") @db.VarChar(100)
+  phone             String?            @db.VarChar(50)
+  address           String?
+  stockTransactions StockTransaction[]
+  quotations        Quotation[]
+
+  @@map("customers")
+}
+
+// 12. Danh mục Sản phẩm / Hàng hóa
+model Product {
+  id                      String                   @id @db.VarChar(50)
+  sku                     String                   @unique @db.VarChar(100)
+  name                    String                   @db.VarChar(255)
+  categoryId              String?                  @map("category_id") @db.VarChar(50)
+  uomId                   String?                  @map("uom_id") @db.VarChar(50)
+  altUomId                String?                  @map("alt_uom_id") @db.VarChar(50)
+  uomConversionRate       Decimal?                 @default(1.0000) @map("uom_conversion_rate") @db.Decimal(12, 4)
+  description             String?
+  currentQty              Decimal?                 @default(0.0000) @map("current_qty") @db.Decimal(14, 4)
+  averageCost             Decimal?                 @default(0.00) @map("average_cost") @db.Decimal(18, 2)
+  imageUrl                String?                  @map("image_url")
+  category                Category?                @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  uom                     Uom?                     @relation("ProductBaseUom", fields: [uomId], references: [id], onDelete: SetNull)
+  altUom                  Uom?                     @relation("ProductAltUom", fields: [altUomId], references: [id], onDelete: SetNull)
+  inventoryStocks         InventoryStock[]
+  stockTransactionDetails StockTransactionDetail[]
+  quotationDetails        QuotationDetail[]
+  webshopProductConfig    WebshopProductConfig?
+
+  @@index([sku], map: "idx_products_sku")
+  @@index([categoryId], map: "idx_products_category")
+  @@map("products")
+}
+
+// 13. Tồn kho chi tiết theo từng Kho
+model InventoryStock {
+  warehouseId String    @map("warehouse_id") @db.VarChar(50)
+  productId   String    @map("product_id") @db.VarChar(50)
+  quantity    Decimal   @default(0.0000) @db.Decimal(14, 4)
+  updatedAt   DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([warehouseId, productId])
+  @@map("inventory_stock")
+}
+
+// 14. Hệ thống Tài khoản Kế toán (Chart of Accounts - TT 133/200)
+model ChartOfAccount {
+  code              String             @id @db.VarChar(50)
+  name              String             @db.VarChar(255)
+  type              String             @db.VarChar(20)
+  parentCode        String?            @map("parent_code") @db.VarChar(50)
+  isCustom          Boolean?           @default(false) @map("is_custom")
+  parent            ChartOfAccount?    @relation("CoaHierarchy", fields: [parentCode], references: [code], onDelete: SetNull)
+  children          ChartOfAccount[]   @relation("CoaHierarchy")
+  accountMappings   AccountMapping[]
+  journalEntryLines JournalEntryLine[]
+  vatLedgers        VatLedger[]
+
+  @@map("chart_of_accounts")
+}
+
+// 15. Thiết lập Ánh xạ Tài khoản Tự động
+model AccountMapping {
+  key         String          @id @db.VarChar(100)
+  accountCode String?         @map("account_code") @db.VarChar(50)
+  description String?
+  account     ChartOfAccount? @relation(fields: [accountCode], references: [code], onDelete: Restrict)
+
+  @@map("account_mappings")
+}
+
+// 16. Báo giá Khách hàng (Quotations)
+model Quotation {
+  id          String            @id @db.VarChar(50)
+  referenceNo String            @unique @map("reference_no") @db.VarChar(100)
+  date        DateTime          @default(now()) @db.Date
+  customerId  String?           @map("customer_id") @db.VarChar(50)
+  subtotal    Decimal           @default(0.00) @db.Decimal(18, 2)
+  vatRate     Decimal           @default(0.00) @map("vat_rate") @db.Decimal(5, 2)
+  vatAmount   Decimal           @default(0.00) @map("vat_amount") @db.Decimal(18, 2)
+  totalAmount Decimal           @default(0.00) @map("total_amount") @db.Decimal(18, 2)
+  notes       String?
+  status      String?           @default("PENDING") @db.VarChar(20)
+  customer    Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  details     QuotationDetail[]
+
+  @@map("quotations")
+}
+
+// 17. Chi tiết Báo giá
+model QuotationDetail {
+  id             String     @id @db.VarChar(50)
+  quotationId    String?    @map("quotation_id") @db.VarChar(50)
+  productId      String?    @map("product_id") @db.VarChar(50)
+  qty            Decimal    @default(0.0000) @db.Decimal(14, 4)
+  uomId          String?    @map("uom_id") @db.VarChar(50)
+  unitPrice      Decimal    @default(0.00) @map("unit_price") @db.Decimal(18, 2)
+  totalPrice     Decimal    @default(0.00) @map("total_price") @db.Decimal(18, 2)
+  conversionRate Decimal?   @default(1.0000) @map("conversion_rate") @db.Decimal(12, 4)
+  quotation      Quotation? @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  product        Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@map("quotation_details")
+}
+
+// 18. Chứng từ Giao dịch Kho (IN, OUT, OPENING)
+model StockTransaction {
+  id                String                   @id @db.VarChar(50)
+  type              String                   @db.VarChar(15)
+  date              DateTime                 @default(now()) @db.Date
+  warehouseId       String?                  @map("warehouse_id") @db.VarChar(50)
+  supplierId        String?                  @map("supplier_id") @db.VarChar(50)
+  customerId        String?                  @map("customer_id") @db.VarChar(50)
+  referenceNo       String                   @unique @map("reference_no") @db.VarChar(100)
+  vatRate           Decimal                  @default(0.00) @map("vat_rate") @db.Decimal(5, 2)
+  vatType           String                   @default("ITEMIZED") @map("vat_type") @db.VarChar(20)
+  subtotal          Decimal                  @default(0.00) @db.Decimal(18, 2)
+  vatAmount         Decimal                  @default(0.00) @map("vat_amount") @db.Decimal(18, 2)
+  totalAmount       Decimal                  @default(0.00) @map("total_amount") @db.Decimal(18, 2)
+  isConfirmed       Boolean?                 @default(false) @map("is_confirmed")
+  isReversed        Boolean?                 @default(false) @map("is_reversed")
+  reversalReference String?                  @map("reversal_reference") @db.VarChar(100)
+  notes             String?
+  prepaidAmount     Decimal?                 @default(0.00) @map("prepaid_amount") @db.Decimal(18, 2)
+  prepaidMethod     String?                  @map("prepaid_method") @db.VarChar(20)
+  dueDate           DateTime?                @map("due_date") @db.Date
+  fiscalYear        Int?                     @map("fiscal_year")
+  isCarryForward    Boolean?                 @default(false) @map("is_carry_forward")
+  linkedClosingYear Int?                     @map("linked_closing_year")
+  warehouse         Warehouse?               @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  supplier          Supplier?                @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  customer          Customer?                @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  details           StockTransactionDetail[]
+  debts             Debt[]
+  vatLedgers        VatLedger[]
+
+  @@index([date], map: "idx_stock_tx_date")
+  @@index([type], map: "idx_stock_tx_type")
+  @@index([fiscalYear], map: "idx_stock_tx_fiscal_year")
+  @@index([referenceNo], map: "idx_stock_tx_ref")
+  @@map("stock_transactions")
+}
+
+// 19. Chi tiết Chứng từ Giao dịch Kho
+model StockTransactionDetail {
+  id           String            @id @db.VarChar(50)
+  txId         String?           @map("tx_id") @db.VarChar(50)
+  productId    String?           @map("product_id") @db.VarChar(50)
+  qty          Decimal           @default(0.0000) @db.Decimal(14, 4)
+  unitPrice    Decimal           @default(0.00) @map("unit_price") @db.Decimal(18, 2)
+  totalPrice   Decimal           @default(0.00) @map("total_price") @db.Decimal(18, 2)
+  vatRate      Decimal           @default(0.00) @map("vat_rate") @db.Decimal(5, 2)
+  vatAmount    Decimal           @default(0.00) @map("vat_amount") @db.Decimal(18, 2)
+  altUomId     String?           @map("alt_uom_id") @db.VarChar(50)
+  altQty       Decimal?          @map("alt_qty") @db.Decimal(14, 4)
+  altUnitPrice Decimal?          @map("alt_unit_price") @db.Decimal(18, 2)
+  cogsUnitCost Decimal?          @default(0.00) @map("cogs_unit_cost") @db.Decimal(18, 2)
+  cogsTotal    Decimal?          @default(0.00) @map("cogs_total") @db.Decimal(18, 2)
+  cartonQty    Decimal?          @default(0.0000) @map("carton_qty") @db.Decimal(14, 4)
+  transaction  StockTransaction? @relation(fields: [txId], references: [id], onDelete: Cascade)
+  product      Product?          @relation(fields: [productId], references: [id], onDelete: SetNull)
+  altUom       Uom?              @relation(fields: [altUomId], references: [id], onDelete: SetNull)
+
+  @@index([txId], map: "idx_stock_tx_details_tx")
+  @@index([productId], map: "idx_stock_tx_details_prod")
+  @@map("stock_transaction_details")
+}
+
+// 20. Sổ Nhật ký chung Kế toán (Journal Entries)
+model JournalEntry {
+  id                String             @id @db.VarChar(50)
+  date              DateTime           @default(now()) @db.Date
+  referenceNo       String             @map("reference_no") @db.VarChar(100)
+  description       String
+  isReversed        Boolean?           @default(false) @map("is_reversed")
+  reversalReference String?            @map("reversal_reference") @db.VarChar(100)
+  isClosingEntry    Boolean?           @default(false) @map("is_closing_entry")
+  fiscalYear        Int?               @map("fiscal_year")
+  lines             JournalEntryLine[]
+
+  @@index([date], map: "idx_journal_entries_date")
+  @@map("journal_entries")
+}
+
+// 21. Chi tiết Bút toán Nợ / Có
+model JournalEntryLine {
+  id          String          @id @db.VarChar(50)
+  entryId     String?         @map("entry_id") @db.VarChar(50)
+  accountCode String?         @map("account_code") @db.VarChar(50)
+  debit       Decimal         @default(0.00) @db.Decimal(18, 2)
+  credit      Decimal         @default(0.00) @db.Decimal(18, 2)
+  partnerId   String?         @map("partner_id") @db.VarChar(50)
+  partnerType String?         @map("partner_type") @db.VarChar(20)
+  entry       JournalEntry?   @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  account     ChartOfAccount? @relation(fields: [accountCode], references: [code], onDelete: Restrict)
+
+  @@index([entryId], map: "idx_journal_lines_entry")
+  @@index([accountCode], map: "idx_journal_lines_account")
+  @@map("journal_entry_lines")
+}
+
+// 22. Quản lý Công nợ Phải thu (AR) & Phải trả (AP)
+model Debt {
+  id                String            @id @db.VarChar(50)
+  type              String            @db.VarChar(10)
+  partnerId         String            @map("partner_id") @db.VarChar(50)
+  txId              String?           @map("tx_id") @db.VarChar(50)
+  referenceNo       String            @map("reference_no") @db.VarChar(100)
+  date              DateTime          @default(now()) @db.Date
+  amount            Decimal           @default(0.00) @db.Decimal(18, 2)
+  paidAmount        Decimal           @default(0.00) @map("paid_amount") @db.Decimal(18, 2)
+  status            String?           @default("UNPAID") @db.VarChar(20)
+  isReversed        Boolean?          @default(false) @map("is_reversed")
+  reversalReference String?           @map("reversal_reference") @db.VarChar(100)
+  dueDate           DateTime?         @map("due_date") @db.Date
+  transaction       StockTransaction? @relation(fields: [txId], references: [id], onDelete: SetNull)
+  payments          Payment[]
+
+  @@index([partnerId, type], map: "idx_debts_partner")
+  @@index([status], map: "idx_debts_status")
+  @@map("debts")
+}
+
+// 23. Phiếu Thu (PT) / Phiếu Chi (PC)
+model Payment {
+  id          String   @id @db.VarChar(50)
+  type        String   @db.VarChar(10)
+  debtId      String?  @map("debt_id") @db.VarChar(50)
+  partnerId   String   @map("partner_id") @db.VarChar(50)
+  partnerType String   @map("partner_type") @db.VarChar(20)
+  date        DateTime @default(now()) @db.Date
+  amount      Decimal  @default(0.00) @db.Decimal(18, 2)
+  method      String   @db.VarChar(20)
+  referenceNo String   @unique @map("reference_no") @db.VarChar(100)
+  notes       String?
+  debt        Debt?    @relation(fields: [debtId], references: [id], onDelete: SetNull)
+
+  @@index([date], map: "idx_payments_date")
+  @@index([referenceNo], map: "idx_payments_ref")
+  @@map("payments")
+}
+
+// 24. Sổ theo dõi Thuế GTGT (VAT Ledger)
+model VatLedger {
+  id              String            @id @db.VarChar(50)
+  type            String            @db.VarChar(10)
+  date            DateTime          @default(now()) @db.Date
+  txId            String?           @map("tx_id") @db.VarChar(50)
+  invoiceNo       String            @map("invoice_no") @db.VarChar(100)
+  partnerName     String            @map("partner_name") @db.VarChar(255)
+  partnerTaxCode  String            @map("partner_tax_code") @db.VarChar(100)
+  amountBeforeVat Decimal           @default(0.00) @map("amount_before_vat") @db.Decimal(18, 2)
+  vatRate         Decimal           @default(0.00) @map("vat_rate") @db.Decimal(5, 2)
+  vatAmount       Decimal           @default(0.00) @map("vat_amount") @db.Decimal(18, 2)
+  accountCode     String?           @map("account_code") @db.VarChar(50)
+  isReversed      Boolean?          @default(false) @map("is_reversed")
+  transaction     StockTransaction? @relation(fields: [txId], references: [id], onDelete: SetNull)
+  account         ChartOfAccount?   @relation(fields: [accountCode], references: [code], onDelete: Restrict)
+
+  @@index([type], map: "idx_vat_ledger_type")
+  @@index([date], map: "idx_vat_ledger_date")
+  @@map("vat_ledger")
+}
+
+// 25. Khóa sổ & Kết chuyển Cuối năm (Fiscal Year Closings)
+model FiscalClosing {
+  id                      String   @id @db.VarChar(50)
+  fiscalYear              Int      @unique @map("fiscal_year")
+  closingDate             DateTime @map("closing_date") @db.Date
+  closedAt                String   @map("closed_at") @db.VarChar(50)
+  closedBy                String   @map("closed_by") @db.VarChar(100)
+  status                  String   @default("LOCKED") @db.VarChar(20)
+  closingJournalEntryId   String?  @map("closing_journal_entry_id") @db.VarChar(50)
+  nextYearOpeningTxIds    Json     @default("[]") @map("next_year_opening_tx_ids")
+  totalRevenueTransferred Decimal  @default(0.00) @map("total_revenue_transferred") @db.Decimal(18, 2)
+  totalCogsTransferred    Decimal  @default(0.00) @map("total_cogs_transferred") @db.Decimal(18, 2)
+  totalExpenseTransferred Decimal  @default(0.00) @map("total_expense_transferred") @db.Decimal(18, 2)
+  taxAmountTransferred    Decimal  @default(0.00) @map("tax_amount_transferred") @db.Decimal(18, 2)
+  netProfitTransferred    Decimal  @default(0.00) @map("net_profit_transferred") @db.Decimal(18, 2)
+  totalClosingStockQty    Decimal  @default(0.0000) @map("total_closing_stock_qty") @db.Decimal(14, 4)
+  totalClosingStockValue  Decimal  @default(0.00) @map("total_closing_stock_value") @db.Decimal(18, 2)
+  stockSnapshots          Json     @default("[]") @map("stock_snapshots")
+  notes                   String?
+
+  @@map("fiscal_closings")
+}
+
+// 26. Cấu hình Cửa hàng Webshop (Singleton id = 1)
+model WebshopStoreConfig {
+  id                       Int      @id @default(1)
+  storeName                String   @default("") @map("store_name") @db.VarChar(255)
+  storeSlogan              String?  @default("") @map("store_slogan")
+  hotline                  String?  @default("") @db.VarChar(100)
+  email                    String?  @default("") @db.VarChar(255)
+  address                  String?  @default("")
+  defaultWarehouseId       String?  @default("") @map("default_warehouse_id") @db.VarChar(50)
+  autoCreateStockOut       Boolean? @default(true) @map("auto_create_stock_out")
+  allowOrderWhenOutOfStock Boolean? @default(false) @map("allow_order_when_out_of_stock")
+  bankName                 String?  @default("") @map("bank_name") @db.VarChar(255)
+  bankAccount              String?  @default("") @map("bank_account") @db.VarChar(100)
+  bankOwner                String?  @default("") @map("bank_owner") @db.VarChar(255)
+  bannerTitle              String?  @default("") @map("banner_title")
+  bannerSubtitle           String?  @default("") @map("banner_subtitle")
+  zaloNumber               String?  @default("") @map("zalo_number") @db.VarChar(50)
+  supportHours             String?  @default("") @map("support_hours") @db.VarChar(100)
+  chatWelcomeMessage       String?  @default("") @map("chat_welcome_message")
+  enableSupportWidget      Boolean? @default(true) @map("enable_support_widget")
+
+  @@map("webshop_store_config")
+}
+
+// 27. Cấu hình Sản phẩm trên Webshop
+model WebshopProductConfig {
+  productId        String   @id @map("product_id") @db.VarChar(50)
+  isPublished      Boolean? @default(true) @map("is_published")
+  retailPrice      Decimal  @default(0.00) @map("retail_price") @db.Decimal(18, 2)
+  promoPrice       Decimal? @map("promo_price") @db.Decimal(18, 2)
+  isFeatured       Boolean? @default(false) @map("is_featured")
+  badge            String?  @db.VarChar(50)
+  shortDescription String?  @map("short_description")
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("webshop_product_configs")
+}
+
+// 28. Đơn đặt hàng Webshop
+model WebshopOrder {
+  id              String             @id @db.VarChar(50)
+  orderCode       String             @unique @map("order_code") @db.VarChar(100)
+  date            DateTime           @default(now()) @db.Date
+  customerName    String             @map("customer_name") @db.VarChar(255)
+  customerPhone   String             @map("customer_phone") @db.VarChar(50)
+  customerEmail   String?            @map("customer_email") @db.VarChar(255)
+  customerAddress String             @map("customer_address")
+  customerId      String?            @map("customer_id") @db.VarChar(50)
+  shippingMethod  String?            @default("STANDARD") @map("shipping_method") @db.VarChar(30)
+  paymentMethod   String?            @default("COD") @map("payment_method") @db.VarChar(30)
+  paymentStatus   String?            @default("UNPAID") @map("payment_status") @db.VarChar(20)
+  orderStatus     String?            @default("PENDING") @map("order_status") @db.VarChar(20)
+  warehouseId     String?            @map("warehouse_id") @db.VarChar(50)
+  subtotal        Decimal            @default(0.00) @db.Decimal(18, 2)
+  discountAmount  Decimal            @default(0.00) @map("discount_amount") @db.Decimal(18, 2)
+  shippingFee     Decimal            @default(0.00) @map("shipping_fee") @db.Decimal(18, 2)
+  vatRate         Decimal            @default(0.00) @map("vat_rate") @db.Decimal(5, 2)
+  vatAmount       Decimal            @default(0.00) @map("vat_amount") @db.Decimal(18, 2)
+  totalAmount     Decimal            @default(0.00) @map("total_amount") @db.Decimal(18, 2)
+  stockTxId       String?            @map("stock_tx_id") @db.VarChar(50)
+  notes           String?
+  createdAt       String?            @map("created_at") @db.VarChar(50)
+  updatedAt       String?            @map("updated_at") @db.VarChar(50)
+  items           WebshopOrderItem[]
+
+  @@index([orderCode], map: "idx_webshop_orders_code")
+  @@index([orderStatus], map: "idx_webshop_orders_status")
+  @@map("webshop_orders")
+}
+
+// 29. Chi tiết mặt hàng trong Đơn hàng Webshop
+model WebshopOrderItem {
+  id          String        @id @db.VarChar(50)
+  orderId     String?       @map("order_id") @db.VarChar(50)
+  productId   String?       @map("product_id") @db.VarChar(50)
+  productSku  String?       @map("product_sku") @db.VarChar(100)
+  productName String?       @map("product_name") @db.VarChar(255)
+  qty         Decimal       @default(0.0000) @db.Decimal(14, 4)
+  uomId       String?       @map("uom_id") @db.VarChar(50)
+  uomName     String?       @map("uom_name") @db.VarChar(50)
+  unitPrice   Decimal       @default(0.00) @map("unit_price") @db.Decimal(18, 2)
+  totalPrice  Decimal       @default(0.00) @map("total_price") @db.Decimal(18, 2)
+  order       WebshopOrder? @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("webshop_order_items")
+}

@@ -1,0 +1,15 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Server-side credential store (hashed passwords, never commit)
+.data/
+.pg-runtime-config.json
+
+# Local Netlify folder
+.netlify

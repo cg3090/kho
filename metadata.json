@@ -1,0 +1,6 @@
+{
+  "name": "Quản lý Kho Thông minh",
+  "description": "Hệ thống quản lý kho, kế toán, công nợ, VAT tự động theo Thông tư 133/200 kết hợp Webshop bán lẻ trực tuyến độc lập và chuông thông báo đơn hàng mới theo thời gian thực.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
