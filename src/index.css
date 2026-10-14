@@ -1,0 +1,112 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Dynamically map theme variables to system themeColor (default: darkgray) */
+  --color-emerald-300: var(--theme-color-lighter, #9ca3af);
+  --color-emerald-400: var(--theme-color-light, #9ca3af);
+  --color-emerald-500: var(--theme-color, #6b7280);
+  --color-emerald-600: var(--theme-color-hover, #4b5563);
+  --color-emerald-700: var(--theme-color-dark, #374151);
+
+  --color-brand: var(--theme-color, #6b7280);
+  --color-primary: var(--theme-color, #6b7280);
+}
+
+:root {
+  --theme-color: #6b7280;
+  --theme-color-rgb: 107, 114, 128;
+  --theme-color-light: #9ca3af;
+  --theme-color-lighter: #d1d5db;
+  --theme-color-hover: #4b5563;
+  --theme-color-dark: #374151;
+}
+
+/* Custom styles for dark theme form elements and scrollbar */
+input, select, textarea {
+  color-scheme: dark;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #08090a;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* High Fidelity Standardized Printing for Vouchers (Circular 133/200) */
+@media print {
+  /* Reset body/html background to pure white for printing */
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Hide absolutely everything by default */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Display only the printable area and all of its inner elements */
+  .printable-area, .printable-area * {
+    visibility: visible !important;
+  }
+
+  /* Stretch the print sheet to occupy full print page with clean margins */
+  .printable-area {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    display: block !important;
+  }
+
+  /* Enforce exact print color rendering for table backgrounds/badges */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Ensure text is deep dark black for professional paper print output */
+  .printable-area p,
+  .printable-area span,
+  .printable-area div,
+  .printable-area td,
+  .printable-area th,
+  .printable-area h1,
+  .printable-area h2,
+  .printable-area h3,
+  .printable-area h4 {
+    color: #000000 !important;
+  }
+
+  /* Define professional margin configuration for standard A4 portrait sheets */
+  @page {
+    size: A4 portrait;
+    margin: 15mm !important;
+  }
+}
+

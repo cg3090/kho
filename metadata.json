@@ -1,0 +1,6 @@
+{
+  "name": "Quản lý Kho",
+  "description": "Hệ thống quản lý kho, kế toán, công nợ, VAT, kết hợp Webshop bán lẻ trực tuyến.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

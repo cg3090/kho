@@ -1,0 +1,20 @@
+{
+  "entities": {
+    "ERPCollection": {
+      "title": "ERP Collection",
+      "description": "Standard ERP collection containing items or configuration key-values",
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array"
+        }
+      }
+    }
+  },
+  "firestore": {
+    "erp_collections/{collectionId}": {
+      "schema": "ERPCollection",
+      "description": "ERP data and configurations collections"
+    }
+  }
+}
