@@ -34,7 +34,6 @@ import {
   WebshopOrderStatus,
   WebshopPaymentMethod,
   WebshopPaymentStatus,
-  WebshopCustomerAccount,
   OpeningStockItemSnapshot,
   FiscalYearClosing,
   InventoryNxtRow,
@@ -46,7 +45,6 @@ import {
   verifyPassword,
   toStoredPassword,
   shortFingerprint,
-  validatePassword,
 } from '../utils/password';
 import { broadcastNewOrder } from '../utils/orderNotifications';
 import { collection, doc, getDocs, setDoc, writeBatch } from 'firebase/firestore';
@@ -102,11 +100,10 @@ export class MockDatabase {
   quotationDetails: QuotationDetail[] = [];
   webshopOrders: WebshopOrder[] = [];
   webshopProductConfigs: WebshopProductConfig[] = [];
-  webshopCustomerAccounts: WebshopCustomerAccount[] = [];
   fiscalClosings: FiscalYearClosing[] = [];
   webshopStoreConfig: WebshopStoreConfig = {
-    storeName: 'V-SMART STORE',
-    storeSlogan: 'Hệ thống bán lẻ',
+    storeName: 'V-SMART DIGITAL STORE',
+    storeSlogan: 'Hệ thống bán lẻ thiết bị công nghệ & phụ kiện chính hãng',
     hotline: '1900 6868 - 0901 888 999',
     email: 'sales@verp.vn',
     address: 'Toà nhà Viettel Tower, 285 Cách Mạng Tháng Tám, Quận 10, TP. Hồ Chí Minh',
@@ -120,7 +117,7 @@ export class MockDatabase {
     bannerSubtitle: 'Đồng bộ kho thực tế 100% - Bảo hành chính hãng - Giao hàng toàn quốc',
     zaloNumber: '0901888999',
     supportHours: '8:00 - 21:30 (Thứ 2 - Chủ Nhật)',
-    chatWelcomeMessage: 'Xin chào Quý khách! Smart WMS Store sẵn sàng hỗ trợ kiểm tra tồn kho, tư vấn sản phẩm và giải đáp đơn hàng.',
+    chatWelcomeMessage: 'Xin chào Quý khách! Smart WMS Store sẵn sàng hỗ trợ kiểm tra tồn kho, tư vấn sản phẩm và giải đáp đơn hàng 24/7.',
     enableSupportWidget: true,
   };
 
@@ -145,7 +142,7 @@ export class MockDatabase {
   currentUser: User | null = null;
 
   // Real database connection tracking
-  dataSource: 'postgres' | 'firebase' | 'local' | 'd1' = 'local';
+  dataSource: 'postgres' | 'firebase' | 'local' = 'local';
   isRealDatabaseConnected: boolean = false;
   postgresConnectionInfo: {
     connected: boolean;
@@ -428,7 +425,6 @@ export class MockDatabase {
       this.deduplicateCollection('quotationDetails', JSON.parse(localStorage.getItem('wms_quotation_details') || '[]'));
       this.deduplicateCollection('webshopOrders', JSON.parse(localStorage.getItem('wms_webshop_orders') || '[]'));
       this.deduplicateCollection('webshopProductConfigs', JSON.parse(localStorage.getItem('wms_webshop_product_configs') || '[]'));
-      this.deduplicateCollection('webshopCustomerAccounts', JSON.parse(localStorage.getItem('wms_webshop_customer_accounts') || '[]'));
       this.deduplicateCollection('fiscalClosings', JSON.parse(localStorage.getItem('wms_fiscal_closings') || '[]'));
       
       const savedStoreConfig = localStorage.getItem('wms_webshop_store_config');
@@ -667,7 +663,6 @@ export class MockDatabase {
       'quotationDetails',
       'webshopOrders',
       'webshopProductConfigs',
-      'webshopCustomerAccounts',
       'fiscalClosings' as any,
       'sequenceConfig' as any,
       'printTemplates' as any,
@@ -773,7 +768,10 @@ export class MockDatabase {
 
   async loadFromPostgres(): Promise<boolean> {
     try {
-      const statusRes = await fetch('/api/db/status');
+      const activeEngine = typeof window !== 'undefined' ? localStorage.getItem('wms_active_db_engine') || 'supabase' : 'supabase';
+      const statusRes = await fetch(`/api/db/status?engine=${activeEngine}`, {
+        headers: { 'x-active-engine': activeEngine },
+      });
       if (!statusRes.ok) return false;
       const statusJson = await statusRes.json();
       this.postgresConnectionInfo = statusJson;
@@ -799,6 +797,7 @@ export class MockDatabase {
     user?: string;
     password?: string;
     ssl?: boolean;
+    engine?: string;
   }): Promise<{ success: boolean; message: string }> {
     try {
       const res = await fetch('/api/db/connect', {
@@ -806,22 +805,32 @@ export class MockDatabase {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
       });
-      const json = await res.json();
+      const text = await res.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        return {
+          success: false,
+          message: `Máy chủ phản hồi HTML thay vì JSON (Mã HTTP ${res.status}). Vui lòng kiểm tra lại kết nối Supabase Cloud.`,
+        };
+      }
       if (!res.ok || !json.connected) {
         return {
           success: false,
-          message: json.error || 'Không thể kết nối tới cơ sở dữ liệu PostgreSQL.',
+          message: json.error || 'Không thể kết nối tới cơ sở dữ liệu Supabase.',
         };
       }
 
       this.dataSource = 'postgres';
       this.isRealDatabaseConnected = true;
+      const isSupabase = json.driver === 'supabase-postgresql' || json.engine === 'supabase' || !json.driver?.includes('cloudflare');
       this.postgresConnectionInfo = {
         connected: true,
-        host: json.host,
-        port: json.port,
-        database: json.database,
-        user: json.user,
+        host: json.host || (isSupabase ? 'aws-0-pooler.supabase.com' : 'localhost'),
+        port: json.port || (isSupabase ? 6543 : 5432),
+        database: json.database || (isSupabase ? 'postgres (Supabase)' : 'khobd'),
+        user: json.user || 'postgres',
       };
 
       this.hydrateFromStateMap(json.data || {});
@@ -833,12 +842,12 @@ export class MockDatabase {
 
       return {
         success: true,
-        message: `Đã kết nối thành công tới PostgreSQL (${json.host}:${json.port}/${json.database}) qua Prisma ORM (${json.tableCount || 29} bảng)! Đã đọc toàn bộ dữ liệu hiện có và ngắt Mock Data.`,
+        message: json.message || `Đã kết nối thành công tới ${json.database || 'Supabase Cloud'} (${json.tableCount || 30} bảng)! Đã tải toàn bộ dữ liệu thật và ngắt Mock Data.`,
       };
     } catch (err: any) {
       return {
         success: false,
-        message: err?.message || 'Lỗi kết nối máy chủ PostgreSQL.',
+        message: err?.message || 'Lỗi kết nối cơ sở dữ liệu.',
       };
     }
   }
@@ -857,11 +866,20 @@ export class MockDatabase {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const json = await res.json();
+      const text = await res.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        return {
+          success: false,
+          message: 'Không thể phân tích phản hồi từ máy chủ.',
+        };
+      }
       if (!res.ok || !json.success) {
         return {
           success: false,
-          message: json.error || json.message || 'Khảo sát ngược (Prisma Introspection) thất bại.',
+          message: json.error || json.message || 'Khảo sát ngược thất bại.',
         };
       }
       if (json.data) {
@@ -950,7 +968,6 @@ export class MockDatabase {
       'accountMapping', 'coa', 'stockTransactions', 'stockTransactionDetails',
       'journalEntries', 'journalLines', 'debts', 'payments', 'vatLedger',
       'quotations', 'quotationDetails', 'webshopOrders', 'webshopProductConfigs',
-      'webshopCustomerAccounts',
       'fiscalClosings' as any,
       'companyInfo' as any, 'systemConfig' as any, 'sequenceConfig' as any,
       'printTemplates' as any, 'users' as any, 'roles' as any, 'webshopStoreConfig' as any
@@ -972,7 +989,6 @@ export class MockDatabase {
       'accountMapping', 'coa', 'stockTransactions', 'stockTransactionDetails',
       'journalEntries', 'journalLines', 'debts', 'payments', 'vatLedger',
       'quotations', 'quotationDetails', 'webshopOrders', 'webshopProductConfigs',
-      'webshopCustomerAccounts',
       'fiscalClosings' as any,
       'companyInfo' as any, 'systemConfig' as any, 'sequenceConfig' as any,
       'printTemplates' as any, 'users' as any, 'roles' as any, 'webshopStoreConfig' as any
@@ -1000,43 +1016,9 @@ export class MockDatabase {
     }
   }
 
-  async loadFromD1(): Promise<boolean> {
-    try {
-      const statusRes = await fetch('/api/db/status');
-      if (!statusRes.ok) return false;
-      const statusJson = await statusRes.json();
-      if (!statusJson.connected) return false;
-
-      const stateRes = await fetch('/api/db/state');
-      if (!stateRes.ok) return false;
-      const stateJson = await stateRes.json();
-      if (!stateJson.connected && !stateJson.success) return false;
-
-      this.hydrateFromStateMap(stateJson.data || stateJson || {});
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   async syncWithFirebase(onStatusChange?: (status: 'loading' | 'synced' | 'error') => void): Promise<void> {
     if (onStatusChange) onStatusChange('loading');
     try {
-      // 0. Detect Cloudflare Workers + D1 environment (auto-detect)
-      const d1Connected = await this.loadFromD1();
-      if (d1Connected) {
-        this.dataSource = 'd1';
-        this.isRealDatabaseConnected = true;
-        const hadMock = this.purgeMockRecords();
-        this.ensureDefaultWebshopConfigs();
-        this.saveAllToLocalStorage();
-        if (hadMock) {
-          await this.saveAllToD1();
-        }
-        if (onStatusChange) onStatusChange('synced');
-        return;
-      }
-
       // 1. Prioritize Real PostgreSQL Connection if configured
       const pgConnected = await this.loadFromPostgres();
       if (pgConnected) {
@@ -1084,69 +1066,10 @@ export class MockDatabase {
     this.saveAllToLocalStorage();
     if (this.dataSource === 'postgres') {
       this.saveAllToPostgres();
-    } else if (this.dataSource === 'd1') {
-      this.saveAllToD1();
     } else {
       this.saveAllToFirebase();
     }
     this.notifyListeners();
-  }
-
-  async saveAllToD1() {
-    const tableMap: Record<string, string> = {
-      company_info: 'companyInfo',
-      system_config: 'systemConfig',
-      categories: 'categories',
-      uoms: 'uoms',
-      warehouses: 'warehouses',
-      suppliers: 'suppliers',
-      customers: 'customers',
-      products: 'products',
-      stock_transactions: 'stockTransactions',
-      stock_transaction_details: 'stockTransactionDetails',
-      chart_of_accounts: 'coa',
-      account_mappings: 'accountMapping',
-      quotations: 'quotations',
-      quotation_details: 'quotationDetails',
-      journal_entries: 'journalEntries',
-      journal_entry_lines: 'journalLines',
-      debts: 'debts',
-      payments: 'payments',
-      vat_ledger: 'vatLedger',
-      fiscal_closings: 'fiscalClosings',
-      webshop_store_config: 'webshopStoreConfig',
-      webshop_product_configs: 'webshopProductConfigs',
-      webshop_orders: 'webshopOrders',
-      webshop_customer_accounts: 'webshopCustomerAccounts',
-      sequence_configs: 'sequenceConfig',
-      print_templates: 'printTemplates',
-      roles: 'roles',
-      users: 'users',
-    };
-
-    const errors: string[] = [];
-
-    for (const [tableName, mockKey] of Object.entries(tableMap)) {
-      const val = (this as any)[mockKey];
-      if (val === undefined || typeof val === 'function') continue;
-      
-      try {
-        const data = Array.isArray(val) ? val : [val];
-        await fetch(`/api/db/table/${tableName}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
-        });
-      } catch (e: any) {
-        errors.push(`${tableName}: ${e.message}`);
-      }
-    }
-    
-    if (errors.length > 0) {
-      console.warn('Đồng bộ D1 một số bảng thất bại:', errors);
-    } else {
-      console.log('Đồng bộ D1 thành công tất cả bảng');
-    }
   }
 
   login(username: string, password?: string): { success: boolean; user?: User; message?: string } {
@@ -1270,250 +1193,6 @@ export class MockDatabase {
     }
   }
 
-  getCurrentWebshopCustomer(): WebshopCustomerAccount | null {
-    try {
-      const id = localStorage.getItem('wms_shop_customer_session');
-      if (!id) return null;
-      const acc = this.webshopCustomerAccounts.find((a) => a.id === id);
-      if (!acc) return null;
-      return { ...acc, password: '' };
-    } catch {
-      return null;
-    }
-  }
-
-  setCurrentWebshopCustomer(account: WebshopCustomerAccount | null) {
-    try {
-      if (account) {
-        localStorage.setItem('wms_shop_customer_session', account.id);
-      } else {
-        localStorage.removeItem('wms_shop_customer_session');
-      }
-    } catch {
-      // Session storage unavailable
-    }
-  }
-
-  registerWebshopCustomer(input: {
-    username: string;
-    email: string;
-    phone: string;
-    fullName: string;
-    address?: string;
-    password: string;
-  }): { success: boolean; account?: WebshopCustomerAccount; message: string } {
-    const username = input.username.trim();
-    const email = input.email.trim().toLowerCase();
-    const phone = input.phone.trim();
-    const fullName = input.fullName.trim();
-
-    if (!username || !email || !phone || !fullName) {
-      return { success: false, message: 'Vui lòng điền đầy đủ thông tin bắt buộc (*).' };
-    }
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
-      return { success: false, message: 'Định dạng email không hợp lệ.' };
-    }
-    if (!/^[0-9\s+\-().]{7,15}$/.test(phone)) {
-      return { success: false, message: 'Số điện thoại không hợp lệ.' };
-    }
-    const pwCheck = validatePassword(input.password);
-    if (!pwCheck.valid) {
-      return { success: false, message: pwCheck.message || 'Mật khẩu không hợp lệ.' };
-    }
-
-    if (this.webshopCustomerAccounts.some((a) => a.username.toLowerCase() === username.toLowerCase())) {
-      return { success: false, message: 'Tên đăng nhập đã được sử dụng. Vui lòng chọn tên khác.' };
-    }
-    if (this.webshopCustomerAccounts.some((a) => a.email === email)) {
-      return { success: false, message: 'Email đã được đăng ký. Vui lòng dùng email khác hoặc đăng nhập.' };
-    }
-    if (this.webshopCustomerAccounts.some((a) => a.phone === phone)) {
-      return { success: false, message: 'Số điện thoại đã được đăng ký. Vui lòng đăng nhập.' };
-    }
-
-    let customer = this.customers.find((c) => c.phone?.trim() === phone);
-    if (!customer) {
-      customer = {
-        id: `cus-ws-${Date.now()}`,
-        name: fullName,
-        phone,
-        address: input.address?.trim() || '',
-        taxCode: '',
-      };
-      this.customers.push(customer);
-      this.save('customers');
-    } else if (!customer.address && input.address?.trim()) {
-      customer.address = input.address.trim();
-      this.save('customers');
-    }
-
-    const account: WebshopCustomerAccount = {
-      id: `ws-acc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      username,
-      email,
-      phone,
-      fullName,
-      address: input.address?.trim() || '',
-      password: toStoredPassword(input.password),
-      createdAt: new Date().toISOString(),
-      wishlist: [],
-      customerId: customer.id,
-    };
-    this.webshopCustomerAccounts.push(account);
-    this.save('webshopCustomerAccounts');
-    this.setCurrentWebshopCustomer(account);
-    return {
-      success: true,
-      account: { ...account, password: '' },
-      message: `Đăng ký thành công! Chào mừng ${fullName} đến với ${this.webshopStoreConfig.storeName}.`,
-    };
-  }
-
-  loginWebshopCustomer(loginKey: string, password: string): { success: boolean; account?: WebshopCustomerAccount; message: string } {
-    const key = loginKey.trim().toLowerCase();
-    if (!key || !password) {
-      return { success: false, message: 'Vui lòng nhập tài khoản và mật khẩu.' };
-    }
-    const account = this.webshopCustomerAccounts.find(
-      (a) =>
-        a.username.toLowerCase() === key ||
-        a.email.toLowerCase() === key ||
-        a.phone === loginKey.trim()
-    );
-    if (!account) {
-      return { success: false, message: 'Tài khoản không tồn tại. Vui lòng đăng ký tài khoản mới.' };
-    }
-    if (!verifyPassword(password, account.password)) {
-      return { success: false, message: 'Mật khẩu không chính xác. Vui lòng thử lại.' };
-    }
-    account.lastLogin = new Date().toISOString();
-    this.save('webshopCustomerAccounts');
-    this.setCurrentWebshopCustomer(account);
-    return {
-      success: true,
-      account: { ...account, password: '' },
-      message: `Đăng nhập thành công! Chào mừng ${account.fullName}.`,
-    };
-  }
-
-  logoutWebshopCustomer() {
-    this.setCurrentWebshopCustomer(null);
-  }
-
-  updateWebshopCustomerProfile(
-    accountId: string,
-    updates: { fullName?: string; email?: string; phone?: string; address?: string; password?: string }
-  ): { success: boolean; account?: WebshopCustomerAccount; message: string } {
-    const idx = this.webshopCustomerAccounts.findIndex((a) => a.id === accountId);
-    if (idx < 0) return { success: false, message: 'Không tìm thấy tài khoản khách hàng.' };
-    const acc = this.webshopCustomerAccounts[idx];
-    const next: WebshopCustomerAccount = { ...acc };
-
-    if (updates.fullName !== undefined) {
-      next.fullName = updates.fullName.trim();
-      if (!next.fullName) return { success: false, message: 'Họ và tên không được để trống.' };
-    }
-    if (updates.email !== undefined) {
-      const email = updates.email.trim().toLowerCase();
-      if (!/^\S+@\S+\.\S+$/.test(email)) {
-        return { success: false, message: 'Định dạng email không hợp lệ.' };
-      }
-      if (email !== acc.email && this.webshopCustomerAccounts.some((a) => a.id !== accountId && a.email === email)) {
-        return { success: false, message: 'Email đã được tài khoản khác sử dụng.' };
-      }
-      next.email = email;
-    }
-    if (updates.phone !== undefined) {
-      const phone = updates.phone.trim();
-      if (!/^[0-9\s+\-().]{7,15}$/.test(phone)) {
-        return { success: false, message: 'Số điện thoại không hợp lệ.' };
-      }
-      if (phone !== acc.phone && this.webshopCustomerAccounts.some((a) => a.id !== accountId && a.phone === phone)) {
-        return { success: false, message: 'Số điện thoại đã được tài khoản khác sử dụng.' };
-      }
-      next.phone = phone;
-    }
-    if (updates.address !== undefined) {
-      next.address = updates.address.trim();
-    }
-    if (updates.password) {
-      const pwCheck = validatePassword(updates.password);
-      if (!pwCheck.valid) {
-        return { success: false, message: pwCheck.message || 'Mật khẩu không hợp lệ.' };
-      }
-      next.password = toStoredPassword(updates.password);
-    }
-
-    this.webshopCustomerAccounts[idx] = next;
-    if (next.customerId) {
-      const cus = this.customers.find((c) => c.id === next.customerId);
-      if (cus) {
-        cus.name = next.fullName;
-        cus.phone = next.phone;
-        if (next.address) cus.address = next.address;
-        this.save('customers');
-      }
-    }
-    this.save('webshopCustomerAccounts');
-    this.setCurrentWebshopCustomer(next);
-    return { success: true, account: { ...next, password: '' }, message: 'Cập nhật thông tin tài khoản thành công!' };
-  }
-
-  toggleWishlistProduct(productId: string): { success: boolean; liked: boolean; message: string } {
-    const acc = this.getCurrentWebshopCustomer();
-    if (!acc) {
-      return { success: false, liked: false, message: 'Vui lòng đăng nhập để lưu sản phẩm yêu thích.' };
-    }
-    const idx = this.webshopCustomerAccounts.findIndex((a) => a.id === acc.id);
-    if (idx < 0) return { success: false, liked: false, message: 'Không tìm thấy tài khoản khách hàng.' };
-    const list = [...(this.webshopCustomerAccounts[idx].wishlist || [])];
-    const pos = list.indexOf(productId);
-    let liked = false;
-    if (pos >= 0) {
-      list.splice(pos, 1);
-    } else {
-      list.push(productId);
-      liked = true;
-    }
-    this.webshopCustomerAccounts[idx].wishlist = list;
-    this.save('webshopCustomerAccounts');
-    return {
-      success: true,
-      liked,
-      message: liked ? 'Đã thêm vào Sản phẩm yêu thích.' : 'Đã xóa khỏi Sản phẩm yêu thích.',
-    };
-  }
-
-  deleteWebshopCustomer(accountId: string): { success: boolean; message: string } {
-    const idx = this.webshopCustomerAccounts.findIndex((a) => a.id === accountId);
-    if (idx < 0) return { success: false, message: 'Không tìm thấy tài khoản khách hàng.' };
-    const acc = this.webshopCustomerAccounts[idx];
-    for (const o of this.webshopOrders) {
-      if (o.accountId === accountId) o.accountId = undefined;
-    }
-    this.webshopCustomerAccounts.splice(idx, 1);
-    try {
-      if (localStorage.getItem('wms_shop_customer_session') === accountId) {
-        localStorage.removeItem('wms_shop_customer_session');
-      }
-    } catch {
-      // Session storage unavailable
-    }
-    this.save('webshopCustomerAccounts');
-    this.save('webshopOrders');
-    return { success: true, message: `Đã xóa tài khoản "${acc.username}". Lịch sử đơn hàng vẫn được giữ lại.` };
-  }
-
-  resetWebshopCustomerPassword(accountId: string, newPassword: string): { success: boolean; message: string } {
-    const acc = this.webshopCustomerAccounts.find((a) => a.id === accountId);
-    if (!acc) return { success: false, message: 'Không tìm thấy tài khoản khách hàng.' };
-    const check = validatePassword(newPassword);
-    if (!check.valid) return { success: false, message: check.message || 'Mật khẩu không hợp lệ.' };
-    acc.password = toStoredPassword(newPassword);
-    this.save('webshopCustomerAccounts');
-    return { success: true, message: `Đặt lại mật khẩu cho "${acc.username}" thành công.` };
-  }
-
   createWebshopOrder(input: {
     customerName: string;
     customerPhone: string;
@@ -1523,7 +1202,6 @@ export class MockDatabase {
     shippingMethod?: 'STANDARD' | 'EXPRESS' | 'STORE_PICKUP';
     paymentMethod: WebshopPaymentMethod;
     paymentStatus?: WebshopPaymentStatus;
-    accountId?: string;
     items: {
       productId: string;
       qty: number;
@@ -1573,24 +1251,6 @@ export class MockDatabase {
       this.save('customers');
     }
 
-    // Link logged-in customer account with the order and keep profile synced
-    let linkedCustomerId = customer.id;
-    if (input.accountId) {
-      const acc = this.webshopCustomerAccounts.find((a) => a.id === input.accountId);
-      if (acc) {
-        if (!acc.customerId) {
-          acc.customerId = customer.id;
-          this.save('webshopCustomerAccounts' as any);
-        } else {
-          linkedCustomerId = acc.customerId;
-        }
-        if (!acc.address && input.customerAddress?.trim()) {
-          acc.address = input.customerAddress.trim();
-          this.save('webshopCustomerAccounts' as any);
-        }
-      }
-    }
-
     // Generate Order Code: WS-YYMMDD-XXX
     const now = new Date();
     const yy = String(now.getFullYear()).substring(2);
@@ -1637,8 +1297,7 @@ export class MockDatabase {
       customerPhone: input.customerPhone.trim(),
       customerEmail: input.customerEmail?.trim(),
       customerAddress: input.customerAddress.trim(),
-      customerId: linkedCustomerId,
-      accountId: input.accountId,
+      customerId: customer.id,
       shippingMethod: input.shippingMethod || 'STANDARD',
       paymentMethod: input.paymentMethod,
       paymentStatus: input.paymentStatus || (input.paymentMethod === 'BANK_TRANSFER' ? 'PAID' : 'UNPAID'),
