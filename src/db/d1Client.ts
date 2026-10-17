@@ -111,12 +111,19 @@ export function getOrCreateLocalD1(): D1Database {
   const dbPath = path.join(dbDir, 'd1_wms.sqlite');
   const sqlite = new DatabaseSync(dbPath);
 
-  // Initialize schema if tables don't exist
-  const migrationPath = path.resolve(process.cwd(), 'drizzle/migrations/0000_init_wms_d1.sql');
-  if (fs.existsSync(migrationPath)) {
+  // Initialize schema with all migrations
+  const migrationsDir = path.resolve(process.cwd(), 'drizzle/migrations');
+  if (fs.existsSync(migrationsDir)) {
     try {
-      const sqlContent = fs.readFileSync(migrationPath, 'utf-8');
-      sqlite.exec(sqlContent);
+      const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+      for (const file of files) {
+        const sqlContent = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+        try {
+          sqlite.exec(sqlContent);
+        } catch {
+          // ignore if table/column already exists
+        }
+      }
     } catch (err) {
       console.warn('Local D1 migration notice:', err);
     }
