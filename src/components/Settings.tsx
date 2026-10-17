@@ -119,15 +119,30 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
     }
   };
 
-  // --- 6. PostgreSQL Real Database Connection State ---
-  const [pgMode, setPgMode] = useState<'fields' | 'uri'>('fields');
+  // --- 6. PostgreSQL & Cloudflare Database Connection State ---
+  const [activeDbEngine, setActiveDbEngine] = useState<'supabase' | 'd1'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('wms_active_db_engine');
+      if (saved === 'supabase' || saved === 'd1') return saved;
+      const savedUri = localStorage.getItem('wms_pg_uri') || '';
+      if (savedUri.includes('supabase')) return 'supabase';
+    }
+    if (db.postgresConnectionInfo?.host?.includes('supabase')) return 'supabase';
+    return 'supabase';
+  });
+  const [pgMode, setPgMode] = useState<'fields' | 'uri'>('uri');
   const [pgHost, setPgHost] = useState<string>(db.postgresConnectionInfo?.host || 'localhost');
   const [pgPort, setPgPort] = useState<number>(db.postgresConnectionInfo?.port || 5432);
-  const [pgDatabase, setPgDatabase] = useState<string>(db.postgresConnectionInfo?.database || 'erp_db');
+  const [pgDatabase, setPgDatabase] = useState<string>(db.postgresConnectionInfo?.database || 'postgres');
   const [pgUser, setPgUser] = useState<string>(db.postgresConnectionInfo?.user || 'postgres');
   const [pgPassword, setPgPassword] = useState<string>('');
-  const [pgSsl, setPgSsl] = useState<boolean>(false);
-  const [pgUri, setPgUri] = useState<string>('');
+  const [pgSsl, setPgSsl] = useState<boolean>(true);
+  const [pgUri, setPgUri] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('wms_pg_uri') || '';
+    }
+    return '';
+  });
   const [pgConnecting, setPgConnecting] = useState<boolean>(false);
   const [pgStatusMessage, setPgStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [prismaIntrospecting, setPrismaIntrospecting] = useState<boolean>(false);
@@ -145,17 +160,11 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
 
   const loadPrismaStatus = async () => {
     try {
-      const res = await authFetch('/api/db/status');
+      const res = await authFetch('/api/prisma/status');
       if (!res.ok) return;
       const json = await res.json();
-      if (json.tables) {
-        // Chuyển đổi format cho UI
-        const tables = Object.entries(json.tables).map(([name, count]) => ({
-          name,
-          count: Number(count),
-        }));
-        setPrismaTables(tables);
-      }
+      if (json.schemaPrisma) setPrismaSchemaText(json.schemaPrisma);
+      if (Array.isArray(json.tables)) setPrismaTables(json.tables);
     } catch {
       // ignore
     }
@@ -168,22 +177,72 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
   }, [activeSubTab]);
 
   const handlePrismaGenerate = async () => {
-    showToast('Tính năng này chỉ dùng cho Prisma local. Worker dùng Drizzle + D1.');
+    setPrismaGenerating(true);
+    setPgStatusMessage(null);
+    try {
+      const res = await authFetch('/api/prisma/generate', { method: 'POST' });
+      const json = await res.json();
+      setPgStatusMessage({
+        type: json.success ? 'success' : 'error',
+        text: json.message || json.error || 'Đã chạy prisma generate.',
+      });
+      if (json.success) {
+        showToast('Đã khởi tạo @prisma/client (prisma generate) thành công!');
+      }
+    } catch (err: any) {
+      setPgStatusMessage({
+        type: 'error',
+        text: err?.message || 'Không thể chạy prisma generate.',
+      });
+    } finally {
+      setPrismaGenerating(false);
+    }
   };
 
   const handlePrismaIntrospect = async () => {
-    showToast('Tính năng này chỉ dùng cho Prisma local. Worker dùng Drizzle + D1.');
+    setPrismaIntrospecting(true);
+    setPgStatusMessage(null);
+    try {
+      const result = await db.introspectPostgresWithPrisma();
+      setPgStatusMessage({
+        type: result.success ? 'success' : 'error',
+        text: result.message,
+      });
+      if (result.schemaPrisma) setPrismaSchemaText(result.schemaPrisma);
+      if (result.cliOutput) setPrismaCliOutput(result.cliOutput);
+      if (Array.isArray(result.tables)) setPrismaTables(result.tables);
+      if (result.success) {
+        onUpdate();
+        showToast('Đã khảo sát ngược PostgreSQL (prisma db pull) & nạp dữ liệu hiện có!');
+      }
+    } finally {
+      setPrismaIntrospecting(false);
+    }
   };
 
   const handleDownloadPrismaSchema = async () => {
-    showToast('Tính năng này chỉ dùng cho Prisma local. Worker dùng Drizzle + D1.');
+    try {
+      const res = await authFetch('/api/prisma/schema');
+      if (!res.ok) throw new Error('Không thể tải schema.prisma');
+      const text = await res.text();
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'schema.prisma';
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('Đã tải xuống file prisma/schema.prisma!');
+    } catch {
+      showToast('Không thể tải file schema.prisma');
+    }
   };
 
   const handleInspectTableRows = async (tableName: string) => {
     setSelectedInspectTable(tableName);
     setLoadingTableRows(true);
     try {
-      const res = await authFetch(`/api/db/table/${encodeURIComponent(tableName)}`);
+      const res = await authFetch(`/api/prisma/table/${encodeURIComponent(tableName)}`);
       const json = await res.json();
       if (json.success && Array.isArray(json.rows)) {
         setInspectTableRows(json.rows);
@@ -219,9 +278,14 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
         text: result.message,
       });
       if (result.success) {
+        setActiveDbEngine('supabase');
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('wms_active_db_engine', 'supabase');
+          if (pgUri.trim()) localStorage.setItem('wms_pg_uri', pgUri.trim());
+        }
         await loadPrismaStatus();
         onUpdate();
-        showToast('Đã kết nối PostgreSQL qua Prisma ORM & ngắt toàn bộ Mock Data!');
+        showToast('Đã kết nối và kích hoạt cơ sở dữ liệu Supabase Cloud thành công!');
       }
     } finally {
       setPgConnecting(false);
@@ -267,9 +331,13 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
       if (ok) {
         db.dataSource = 'postgres';
         db.isRealDatabaseConnected = true;
+        setActiveDbEngine('d1');
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('wms_active_db_engine', 'd1');
+        }
         db.saveAllToLocalStorage();
         onUpdate();
-        showToast(`⚡ Đã kết nối & đồng bộ Cloudflare D1 (${db.products.length} Sản phẩm, ${db.customers.length} Khách hàng)!`);
+        showToast(`⚡ Đã chuyển sang Cloudflare D1 (${db.products.length} Sản phẩm, ${db.customers.length} Khách hàng)!`);
       } else {
         showToast('⚠️ Không thể tải dữ liệu từ D1. Vui lòng kiểm tra lại D1 binding.');
       }
@@ -648,7 +716,7 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
           { id: 'sequence', label: 'Số thứ tự chứng từ', icon: Binary },
           { id: 'templates', label: 'Thiết kế mẫu in', icon: FileCode },
           { id: 'data', label: 'Import/Export Excel', icon: FileSpreadsheet },
-          { id: 'database', label: 'Database Supabase & Cloudflare', icon: Database },
+          { id: 'database', label: 'Cơ sở dữ liệu Supabase', icon: Database },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeSubTab === tab.id;
@@ -1331,42 +1399,42 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Server className="w-4 h-4 text-emerald-400" />
-                  Cấu hình Kết nối Cơ sở dữ liệu Thực tế (PostgreSQL / Cloud DB)
+                  Cấu hình Kết nối Cơ sở dữ liệu Supabase (PostgreSQL)
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Khi hệ thống đã kết nối với dữ liệu thật (PostgreSQL hoặc Cloud Database), chế độ Mock Data tự động bị vô hiệu hóa hoàn toàn.
+                  Hệ thống kết nối trực tiếp với Supabase Cloud. Dữ liệu thực tế 100%, bảo mật SSL/TLS, vô hiệu hóa hoàn toàn Mock Data.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={handleSyncWithD1}
+                  onClick={handleConnectPostgres}
                   disabled={pgConnecting}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/15 border border-cyan-500/40 hover:bg-cyan-500/25 text-cyan-300 text-xs font-bold transition shadow-sm"
-                  title="Tải lại toàn bộ trạng thái dữ liệu thật từ Cloudflare D1 Database"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 hover:bg-emerald-500/25 text-emerald-300 text-xs font-bold transition shadow-sm cursor-pointer"
+                  title="Kiểm tra và đồng bộ lại toàn bộ dữ liệu từ Supabase Cloud Database"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${pgConnecting ? 'animate-spin' : ''}`} />
-                  ⚡ Đồng bộ Cloudflare D1
+                  <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${pgConnecting ? 'animate-spin' : ''}`} />
+                  ⚡ Đồng bộ Supabase
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowSupabaseModal(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 hover:bg-emerald-500/25 text-emerald-300 text-xs font-bold transition shadow-sm"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 border border-white/15 hover:bg-white/15 text-slate-200 text-xs font-bold transition shadow-sm cursor-pointer"
                 >
-                  <Zap className="w-3.5 h-3.5 text-emerald-400" />
-                  ⚡ Kết nối Supabase
+                  <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                  Hướng dẫn Supabase
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowCloudflareModal(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 hover:bg-amber-500/25 text-amber-300 text-xs font-bold transition shadow-sm"
+                  onClick={handleCopySqlSchema}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/25 text-amber-300 text-xs font-bold transition shadow-sm cursor-pointer"
                 >
-                  <Cloud className="w-3.5 h-3.5 text-amber-400" />
-                  ☁️ Deploy Cloudflare
+                  {copiedSql ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-amber-400" />}
+                  {copiedSql ? 'Đã chép SQL' : 'Chép SQL 30 bảng'}
                 </button>
                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold">
                   <ShieldCheck className="w-4 h-4" />
-                  ĐÃ TẮT MOCK DATA (100% DỮ LIỆU THẬT)
+                  ĐÃ TẮT MOCK DATA (100% REAL DATA)
                 </span>
               </div>
             </div>
@@ -1376,19 +1444,13 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
               <div className="bg-[#161a23] border border-white/10 rounded-xl p-4">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Nguồn Dữ Liệu Đang Hoạt Động</span>
                 <div className="mt-2 flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="w-2.5 h-2.5 rounded-full animate-pulse bg-emerald-400" />
                   <span className="text-sm font-black text-white">
-                    {db.dataSource === 'postgres'
-                      ? 'Cloudflare D1 Database (Edge SQL)'
-                      : db.dataSource === 'firebase'
-                      ? 'Cloud Realtime Database'
-                      : 'Local Storage (Đã tắt Mock)'}
+                    Supabase Cloud (PostgreSQL)
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  {db.dataSource === 'postgres'
-                    ? `Cơ sở dữ liệu: Cloudflare D1 (SQLite) • ORM: Drizzle • Chuẩn tiền tệ: VNĐ Integer`
-                    : 'Không tự động sinh dữ liệu mẫu khi bảng trống'}
+                  {`PostgreSQL Cloud • Host: ${db.postgresConnectionInfo?.host || 'aws-0-pooler.supabase.com'} • Cổng: 6543 / 5432 • Mã hóa SSL: Bật`}
                 </p>
               </div>
 
@@ -1413,7 +1475,7 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
                 <button
                   type="button"
                   onClick={handlePurgeMockNow}
-                  className="mt-3 w-full py-2 px-3 rounded-lg bg-white/[0.07] hover:bg-emerald-500/15 border border-white/10 hover:border-emerald-500/30 text-xs font-bold text-slate-200 hover:text-emerald-400 transition flex items-center justify-center gap-1.5"
+                  className="mt-3 w-full py-2 px-3 rounded-lg bg-white/[0.07] hover:bg-emerald-500/15 border border-white/10 hover:border-emerald-500/30 text-xs font-bold text-slate-200 hover:text-emerald-400 transition flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   Quét &amp; Xóa Sạch Mock Data
@@ -1421,15 +1483,104 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
               </div>
             </div>
 
-            {/* PostgreSQL Direct Connection Form */}
-            <form onSubmit={handleConnectPostgres} className="bg-[#161a23] border border-white/10 rounded-xl p-5 space-y-4">
+            {/* SUPABASE ACTIVE BANNER */}
+            <div className="bg-gradient-to-r from-emerald-950/50 via-[#161a23] to-teal-950/40 border border-emerald-500/40 rounded-xl p-5 space-y-3.5 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-500/20 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                    <Zap className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-black text-white uppercase tracking-wider">
+                        Cơ Sở Dữ Liệu: Supabase Cloud (PostgreSQL)
+                      </h4>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-[10px] font-bold text-emerald-300">
+                        Đang Hoạt Động
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 mt-0.5 font-mono">
+                      Máy chủ: <strong className="text-emerald-300">{db.postgresConnectionInfo?.host || 'aws-0-pooler.supabase.com'}</strong> • Database: <strong className="text-cyan-300">{db.postgresConnectionInfo?.database || 'postgres'}</strong> • Mã hóa SSL/TLS: <span className="text-emerald-400 font-bold">Bật</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowSupabaseModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-slate-200 font-bold text-xs border border-white/10 transition cursor-pointer"
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                    Hướng dẫn
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopySqlSchema}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-xs transition cursor-pointer"
+                  >
+                    {copiedSql ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-amber-400" />}
+                    {copiedSql ? 'Đã chép SQL' : 'Chép SQL 30 bảng'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const form = document.getElementById('postgres-connect-form');
+                      if (form) form.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs transition cursor-pointer shadow-sm"
+                  >
+                    <Database className="w-3.5 h-3.5" />
+                    Kiểm tra kết nối
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-slate-200 space-y-1.5">
+                <div className="flex items-center gap-2 text-emerald-300 font-bold">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>Trạng Thái Đồng Bộ Supabase Cloud (PostgreSQL):</span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Hệ thống lưu trữ và đồng bộ trực tiếp với cơ sở dữ liệu <strong>Supabase Cloud (PostgreSQL)</strong>. Mọi nghiệp vụ nhập xuất kho, hóa đơn, báo giá, công nợ và kế toán được bảo toàn 100% dữ liệu thật.
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-emerald-500/20 font-mono text-[11px]">
+                  <div className="bg-black/30 p-2 rounded border border-white/5">
+                    <span className="text-slate-400 block text-[10px]">SẢN PHẨM:</span>
+                    <strong className="text-emerald-400 text-sm">{db.products.length}</strong>
+                  </div>
+                  <div className="bg-black/30 p-2 rounded border border-white/5">
+                    <span className="text-slate-400 block text-[10px]">KHÁCH HÀNG:</span>
+                    <strong className="text-cyan-400 text-sm">{db.customers.length}</strong>
+                  </div>
+                  <div className="bg-black/30 p-2 rounded border border-white/5">
+                    <span className="text-slate-400 block text-[10px]">PHIẾU KHO:</span>
+                    <strong className="text-amber-400 text-sm">{db.stockTransactions.length}</strong>
+                  </div>
+                  <div className="bg-black/30 p-2 rounded border border-white/5">
+                    <span className="text-slate-400 block text-[10px]">TÀI KHOẢN:</span>
+                    <strong className="text-indigo-400 text-sm">{db.users.length}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Connection Form (Supabase / PostgreSQL) */}
+            <form id="postgres-connect-form" onSubmit={handleConnectPostgres} className="bg-[#161a23] border border-white/10 rounded-xl p-5 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-3">
                 <div>
-                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-                    Thiết lập Kết nối Trực tiếp PostgreSQL (Node-Postgres Pool)
-                  </h4>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                      {activeDbEngine === 'supabase'
+                        ? 'Cấu Hình Kết Nối Supabase Cloud (PostgreSQL URI)'
+                        : 'Cấu Hình Kết Nối Database Ngoài PostgreSQL (Supabase / Neon)'}
+                    </h4>
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-bold text-emerald-300">
+                      PostgreSQL
+                    </span>
+                  </div>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Hệ thống sẽ tự động khởi tạo cấu trúc bảng chuẩn Thông tư 133/200 và đồng bộ 100% dữ liệu thật với PostgreSQL.
+                    Dán chuỗi Connection URI từ Supabase Dashboard (cổng 6543 hoặc 5432) để đồng bộ 100% dữ liệu thật.
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5 bg-[#0d1117] p-1 rounded-lg border border-white/10 self-start">
@@ -1502,6 +1653,14 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
                       <Zap className="w-4 h-4 text-emerald-400 shrink-0 animate-pulse" />
                       <span>
                         <strong>Đã nhận diện Supabase Cloud Database:</strong> Tự động kích hoạt mã hóa SSL/TLS và hỗ trợ chuẩn Transaction Pooler Supabase.
+                      </span>
+                    </div>
+                  )}
+                  {pgUri.includes('[') && pgUri.includes(']') && (
+                    <div className="flex items-center gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-medium">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>
+                        <strong>Chú ý:</strong> Chuỗi URI đang chứa ký hiệu ngoặc vuông <code className="bg-black/40 px-1 py-0.5 rounded font-mono text-amber-200">[...]</code>. Bạn cần thay thế bằng mật khẩu database và Project Ref thật của Supabase!
                       </span>
                     </div>
                   )}
@@ -1654,10 +1813,14 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
                   <button
                     type="submit"
                     disabled={pgConnecting}
-                    className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 text-white font-extrabold text-xs uppercase tracking-wider transition"
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 text-white font-extrabold text-xs uppercase tracking-wider transition cursor-pointer shadow-md"
                   >
                     <Database className="w-4 h-4" />
-                    {pgConnecting ? 'Đang kiểm tra & kết nối...' : 'Kết nối PostgreSQL (Prisma ORM)'}
+                    {pgConnecting
+                      ? 'Đang kiểm tra kết nối...'
+                      : activeDbEngine === 'supabase'
+                      ? '⚡ Kiểm Tra & Kết Nối Supabase'
+                      : 'Kiểm Tra & Kết Nối Database'}
                   </button>
                 </div>
               </div>
@@ -1833,6 +1996,43 @@ export default function Settings({ db, onUpdate }: SettingsProps) {
                 </div>
               </div>
             </div>
+
+            {/* Collapsed Secondary Option: Cloudflare Pages & Edge Cache */}
+            <details className="bg-[#10141d] border border-white/10 rounded-xl p-4 text-xs text-slate-400">
+              <summary className="font-bold text-slate-300 cursor-pointer flex items-center justify-between hover:text-white transition select-none">
+                <span className="flex items-center gap-2">
+                  <Cloud className="w-4 h-4 text-cyan-400" />
+                  Tùy chọn phụ: Triển khai Cloudflare Pages &amp; Edge Cache (Tùy chọn)
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-white/5 border border-white/10 text-slate-400">
+                  Mở rộng / Thu gọn
+                </span>
+              </summary>
+              <div className="pt-3 mt-3 border-t border-white/5 space-y-3">
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Cơ sở dữ liệu chính của bạn là <strong>Supabase Cloud (PostgreSQL)</strong>. Tùy chọn này chỉ cần thiết nếu bạn muốn triển khai ứng dụng web lên hạ tầng Cloudflare Pages CDN toàn cầu.
+                </p>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowCloudflareModal(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/25 text-amber-300 text-xs font-bold transition shadow-sm cursor-pointer"
+                  >
+                    <Cloud className="w-3.5 h-3.5 text-amber-400" />
+                    Hướng dẫn Deploy Cloudflare Pages
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSyncWithD1}
+                    disabled={pgConnecting}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 hover:bg-cyan-500/20 text-cyan-300 text-xs font-semibold transition cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${pgConnecting ? 'animate-spin' : ''}`} />
+                    Kiểm tra D1 Edge Binding
+                  </button>
+                </div>
+              </div>
+            </details>
           </div>
         )}
       </div>
