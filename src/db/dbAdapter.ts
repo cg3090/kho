@@ -60,9 +60,15 @@ export class PostgresDatabaseAdapter implements IDatabaseAdapter {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ connectionString: this.connectionString }),
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error('Máy chủ phản hồi HTML thay vì JSON.');
+      }
       if (!res.ok || !data.connected) {
-        throw new Error(data.error || 'Failed to connect to PostgreSQL');
+        throw new Error(data.error || data.message || 'Failed to connect to database');
       }
       this.isConnected = true;
       return;
