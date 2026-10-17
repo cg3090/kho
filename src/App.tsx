@@ -77,10 +77,6 @@ export default function App() {
   // App view mode: 'admin' (Hệ thống Quản trị Kho WMS/ERP) vs 'shop' (Giao diện Webshop Khách Hàng Độc Lập)
   const [viewMode, setViewMode] = useState<'admin' | 'shop'>(() => {
     if (typeof window !== 'undefined') {
-      // Check for /shop path first
-      if (window.location.pathname.startsWith('/shop')) {
-        return 'shop';
-      }
       const urlParams = new URLSearchParams(window.location.search);
       if (urlParams.get('mode') === 'shop' || window.location.hash === '#shop') {
         return 'shop';
@@ -246,7 +242,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex bg-[#08090a] text-slate-300 h-screen w-screen overflow-hidden font-sans relative">
+    <div className="flex bg-[#08090a] text-slate-300 h-screen w-full font-sans relative overflow-hidden">
       {/* Realtime Floating Notification Toast for incoming customer orders */}
       <AnimatePresence>
         {orderToast && (
@@ -345,7 +341,7 @@ export default function App() {
       />
 
       {/* Main viewport */}
-      <div className="flex-1 flex flex-col h-full w-full min-w-0">
+      <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
         {/* Top Header */}
         <header className="bg-[#0d1117]/80 backdrop-blur-md h-16 border-b border-white/5 flex items-center justify-between px-3 sm:px-6 lg:px-8 shadow-2xl relative z-30 shrink-0">
           {/* Khu vực hiển thị Tên và Icon đồng bộ với Sidebar */}
@@ -396,14 +392,34 @@ export default function App() {
                 Đang kết nối Database...
               </span>
             )}
-            {syncStatus === 'synced' && (
-              <span className="text-xs bg-emerald-500/10 text-emerald-400 font-bold px-2.5 py-1 rounded-full border border-emerald-500/20 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></span>
-                {db.dataSource === 'postgres'
-                  ? '⚡ Cloudflare D1 Database'
-                  : '☁️ Cloud Realtime Database'}
-              </span>
-            )}
+            {syncStatus === 'synced' && (() => {
+              const engine = typeof window !== 'undefined' ? localStorage.getItem('wms_active_db_engine') : 'supabase';
+              const isD1 = engine === 'd1';
+
+              const badge = !isD1
+                ? {
+                    label: '⚡ Supabase Cloud (PostgreSQL)',
+                    className: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25',
+                    dotClass: 'bg-emerald-400',
+                  }
+                : {
+                    label: '☁️ Cloudflare D1 Database (Edge SQL)',
+                    className: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30 hover:bg-cyan-500/25',
+                    dotClass: 'bg-cyan-400',
+                  };
+
+              return (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('settings')}
+                  title="Nhấn để xem cấu hình Cơ sở dữ liệu Supabase Cloud (PostgreSQL)"
+                  className={`text-xs font-bold px-3 py-1 rounded-full border flex items-center gap-1.5 transition cursor-pointer ${badge.className}`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${badge.dotClass}`}></span>
+                  {badge.label}
+                </button>
+              );
+            })()}
             {syncStatus === 'error' && (
               <span className="text-xs bg-rose-500/10 text-rose-400 font-bold px-2.5 py-1 rounded-full border border-rose-500/20 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 bg-rose-400 rounded-full"></span>
@@ -420,7 +436,7 @@ export default function App() {
               type="button"
               onClick={() => setShowGlobalExcelModal(true)}
               className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-bold transition shadow-sm"
-              title="Nhập dữ liệu từ file Excel cho mọi danh mục, tồn đầu kỳ, chứng từ, công nợ"
+              title="Nhập dữ liệu hàng loạt từ file Excel (.xlsx, .xls, .csv) cho mọi danh mục, tồn đầu kỳ, chứng từ, công nợ"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
               <span className="hidden sm:inline">Import Excel</span>
@@ -534,7 +550,7 @@ export default function App() {
         </header>
 
         {/* Content canvas - Fluid responsive padding and RBAC protection */}
-        <main className="flex-1 overflow-y-auto overflow-x-auto p-3 sm:p-4 md:p-5 lg:p-6 w-full h-full min-w-0 scrollbar-thin">
+        <main className="flex-1 overflow-y-auto overflow-x-auto p-3.5 sm:p-5 md:p-6 lg:p-7 w-full min-w-0 scrollbar-thin">
           {!canAccessTab(activeTab, currentUser, db.roles) ? (
             <div className="bg-[#11141b] border border-rose-500/20 rounded-2xl p-6 sm:p-8 text-center max-w-lg mx-auto my-12">
               <ShieldAlert className="w-12 h-12 text-rose-400 mx-auto mb-3" />
