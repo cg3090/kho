@@ -148,6 +148,7 @@ export class MockDatabase {
   // Real database connection tracking
   dataSource: 'postgres' | 'firebase' | 'local' = 'local';
   isRealDatabaseConnected: boolean = false;
+  remoteWritesEnabled: boolean = false;
   postgresConnectionInfo: {
     connected: boolean;
     host?: string;
@@ -631,6 +632,15 @@ export class MockDatabase {
   }
 
   save(key: keyof MockDatabase) {
+    if (import.meta.env.PROD) {
+      const catalogs = new Set(['categories', 'uoms', 'warehouses', 'suppliers', 'customers']);
+      if (!this.isRealDatabaseConnected || !this.remoteWritesEnabled || !catalogs.has(String(key))) {
+        throw new Error('Chức năng ghi dữ liệu này chưa được kích hoạt trên PostgreSQL. Không có dữ liệu nào được xác nhận lưu.');
+      }
+      void this.saveToPostgres(key);
+      this.notifyListeners();
+      return;
+    }
     if (Array.isArray(this[key])) {
       (this as any)[key] = [...(this[key] as any[])];
     }
@@ -712,10 +722,16 @@ export class MockDatabase {
       if (!response.ok) throw new Error(`PostgreSQL rejected ${String(key)} (${response.status})`);
     } catch (e) {
       console.warn(`Lưu PostgreSQL (${String(key)}) thất bại:`, e);
+      if (import.meta.env.PROD) {
+        alert(`Không lưu được ${String(key)} lên PostgreSQL. Vui lòng kiểm tra Supabase và tải lại dữ liệu.`);
+        await this.loadFromPostgres();
+        this.notifyListeners();
+      }
     }
   }
 
   async saveAllToPostgres() {
+    if (import.meta.env.PROD) throw new Error('Không hỗ trợ đồng bộ hàng loạt từ trình duyệt lên PostgreSQL.');
     const keys: (keyof MockDatabase)[] = [
       'categories', 'uoms', 'warehouses', 'suppliers', 'customers', 'products',
       'accountMapping', 'coa', 'stockTransactions', 'stockTransactionDetails',
@@ -792,7 +808,8 @@ export class MockDatabase {
       if (!statusRes.ok) return false;
       const statusJson = await statusRes.json();
       this.postgresConnectionInfo = statusJson;
-      if (!statusJson.connected) return false;
+      this.remoteWritesEnabled = Boolean(statusJson.businessMutationsEnabled);
+      if (!statusJson.connected || (import.meta.env.PROD && statusJson.schemaReady === false)) return false;
 
       const stateRes = await authFetch('/api/db/state');
       if (!stateRes.ok) return false;
@@ -1092,6 +1109,7 @@ export class MockDatabase {
   }
 
   saveAll() {
+    if (import.meta.env.PROD) throw new Error('Đồng bộ toàn bộ dữ liệu chưa được hỗ trợ trên bản hosted.');
     this.saveAllToLocalStorage();
     if (this.dataSource === 'postgres') {
       this.saveAllToPostgres();
@@ -1164,6 +1182,7 @@ export class MockDatabase {
   }
 
   resetDatabase() {
+    if (import.meta.env.PROD) throw new Error('Không được reset database qua trình duyệt.');
     localStorage.clear();
     this.clearBusinessCollections();
     this.accountMapping = [...DEFAULT_MAPPING];
