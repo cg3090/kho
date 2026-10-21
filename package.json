@@ -28,7 +28,9 @@
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio",
-    "test:security": "tsx --test tests/session.test.ts"
+    "test:security": "tsx --test tests/session.test.ts",
+    "test:api": "tsx --test tests/netlify-postgres.test.ts",
+    "build:api:check": "esbuild netlify/functions/api.ts --bundle --platform=node --format=esm --packages=external --outfile=/tmp/kho-netlify-api-check.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
