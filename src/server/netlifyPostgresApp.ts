@@ -9,6 +9,7 @@ import { verifyPostgresPassword, hashPostgresPassword } from './security/postgre
 import { loadFullStateViaPrisma } from '../db/prismaClient';
 import { createPostgresPayment } from './services/postgresPaymentService';
 import { savePostgresCatalog, CatalogValidationError } from './services/postgresCatalogService';
+import { createPostgresStockTransaction, StockValidationError } from './services/postgresStockService';
 
 const api = new Hono<{ Variables: { user: ReturnType<typeof safeUser> } }>();
 const writesEnabled = () => process.env.ENABLE_POSTGRES_WRITES === 'true';
@@ -199,6 +200,25 @@ api.post('/api/db/collection/:key', async (c) => {
     }
     console.error('PostgreSQL catalog transaction failed', error);
     return c.json({ success: false, error: 'Catalog transaction failed or conflicted' }, 503);
+  }
+});
+
+// Stock accounting is independently gated until Supabase staging tests complete.
+api.post('/api/stock-transactions', async (c) => {
+  if (!writesEnabled() || process.env.ENABLE_POSTGRES_STOCK_WRITES !== 'true') {
+    return c.json({ error: 'Stock mutations disabled pending PostgreSQL staging verification' }, 503);
+  }
+  if (c.get('user').roleId !== 'ADMIN') return c.json({ error: 'Administrator required for stock posting' }, 403);
+  const body = await c.req.json().catch(() => null);
+  try {
+    const result = await createPostgresStockTransaction(database(), body);
+    return c.json(result, 201);
+  } catch (error) {
+    if (error instanceof StockValidationError) {
+      return c.json({ success: false, error: error.message }, 400);
+    }
+    console.error('PostgreSQL stock transaction failed', error);
+    return c.json({ success: false, error: 'Stock transaction failed and rolled back' }, 503);
   }
 });
 
