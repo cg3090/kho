@@ -7,6 +7,7 @@ import { PrismaClient } from '@prisma/client';
 import { createSession, verifySession } from './security/session';
 import { verifyPassword } from '../utils/password';
 import { loadFullStateViaPrisma } from '../db/prismaClient';
+import { createPostgresPayment } from './services/postgresPaymentService';
 
 const api = new Hono();
 let prisma: PrismaClient | undefined;
@@ -161,6 +162,25 @@ api.get('/api/webshop/orders', async (c) => {
     return c.json(await database().webshopOrder.findMany({ include: { items: true }, orderBy: { date: 'desc' } }));
   } catch {
     return c.json({ error: 'Database unavailable' }, 503);
+  }
+});
+
+// Accounting payments use a single PostgreSQL transaction and row-level debt lock.
+// Keep restricted to ADMIN until granular accounting permissions have been verified.
+api.post('/api/payments', async (c) => {
+  if (c.get('user').roleId !== 'ADMIN') return c.json({ error: 'Administrator required for payments' }, 403);
+  const body = await c.req.json().catch(() => null);
+  try {
+    const result = await createPostgresPayment(database(), body);
+    return c.json(result, 201);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Payment failed';
+    if (message.includes('thanh toán') || message.includes('công nợ') || message.includes('Công nợ') ||
+        message.includes('Loại') || message.includes('Ngày') || message.includes('Thiếu tài khoản')) {
+      return c.json({ success: false, error: message }, 400);
+    }
+    console.error('PostgreSQL payment transaction failed', error);
+    return c.json({ success: false, error: 'Payment transaction failed' }, 503);
   }
 });
 
