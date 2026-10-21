@@ -48,7 +48,7 @@ export async function createPostgresPayment(db: PrismaClient, input: PaymentRequ
       `;
       const debt = rows[0];
       if (!debt || debt.is_reversed || debt.partner_id !== input.partnerId ||
-          (input.type === 'RECEIVE' ? debt.type !== 'RECEIVABLE' : debt.type !== 'PAYABLE')) {
+          (input.type === 'RECEIVE' ? debt.type !== 'AR' : debt.type !== 'AP')) {
         throw new Error('Công nợ không hợp lệ hoặc không khớp đối tác');
       }
       const total = new Prisma.Decimal(debt.amount);
