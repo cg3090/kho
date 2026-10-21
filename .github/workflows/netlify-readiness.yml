@@ -26,6 +26,8 @@ jobs:
         run: npm run test:password
       - name: Verify PostgreSQL payment integrity
         run: npm run test:payment
+      - name: Verify stock request guards
+        run: npm run test:stock
       - name: Compile Netlify API entry
         run: npm run build:api:check
       - name: Test Netlify function routing
