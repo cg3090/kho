@@ -5,7 +5,7 @@
 import { Hono } from 'hono';
 import { PrismaClient } from '@prisma/client';
 import { createSession, verifySession } from './security/session';
-import { verifyPassword } from '../utils/password';
+import { verifyPostgresPassword, hashPostgresPassword } from './security/postgresPassword';
 import { loadFullStateViaPrisma } from '../db/prismaClient';
 import { createPostgresPayment } from './services/postgresPaymentService';
 import { savePostgresCatalog, CatalogValidationError } from './services/postgresCatalogService';
@@ -61,8 +61,14 @@ api.post('/api/auth/login', async (c) => {
   try {
     const db = database();
     const user = await db.user.findUnique({ where: { username }, include: { role: true } });
-    if (!user || user.status !== 'ACTIVE' || !verifyPassword(password, user.password)) {
+    if (!user || user.status !== 'ACTIVE') {
       return c.json({ success: false, error: 'Tên đăng nhập hoặc mật khẩu không đúng' }, 401);
+    }
+    const verified = await verifyPostgresPassword(password, user.password);
+    if (!verified.valid) return c.json({ success: false, error: 'Tên đăng nhập hoặc mật khẩu không đúng' }, 401);
+    if (verified.upgrade) {
+      const upgraded = await hashPostgresPassword(password);
+      await db.user.updateMany({ where: { id: user.id, password: user.password }, data: { password: upgraded } });
     }
     const token = await createSession(user.id, user.roleId || '', process.env);
     await db.user.update({ where: { id: user.id }, data: { lastLogin: new Date().toISOString() } });
