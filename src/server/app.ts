@@ -288,7 +288,7 @@ app.get('/api/auth/me', async (c) => {
     if (!authHeader) {
       return c.json({ error: 'Chưa đăng nhập' }, 401);
     }
-    const payload = await verifySession(authHeader.replace(/^Bearer\\s+/i, ''), c.env);
+    const payload = await verifySession(authHeader.replace(/^Bearer\s+/i, ''), c.env);
     if (!payload) return c.json({ error: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn' }, 401);
     const db = getDb(c.env);
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, payload.sub)).limit(1);
