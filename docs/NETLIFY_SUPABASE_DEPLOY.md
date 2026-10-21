@@ -55,3 +55,35 @@ GitHub Actions chạy những bước này trên Pull Request. Kết quả xanh 
 - API `/api/db/state` sử dụng bộ tải Prisma hiện có, bỏ trường chứa password/secrets khi trả frontend. Tiếp tục kiểm tra toàn bộ dữ liệu và ủy quyền trước khi dùng SaaS nhiều tenant.
 - Sử dụng transaction pooler của Supabase, nhưng xác minh khả năng tương thích Prisma transactions và mức giới hạn kết nối tại staging.
 - Các route auth cũ bên Cloudflare D1 vẫn giữ để tránh tự thay đổi môi trường Cloudflare; production nên thống nhất một đường xác thực sau khi migration hoàn chỉnh.
+
+
+## Netlify deploy preview (không bật ghi dữ liệu production)
+
+1. GitHub: chọn nhánh `fix/netlify-supabase-deployment-audit` để tạo Deploy Preview. **Không merge main**.
+2. Trong Netlify, Build command: `npm run build`, Publish directory: `dist`, Node 22.
+3. Khai báo trong Netlify Environment variables (chọn scope Functions phù hợp):
+   - `DATABASE_URL`: chuỗi kết nối **database staging Supabase**, không phải database production.
+   - `JWT_SECRET`: chuỗi ngẫu nhiên đủ mạnh, chỉ lưu ở Functions.
+   - `ENABLE_POSTGRES_WRITES=false`.
+   - `ENABLE_POSTGRES_STOCK_WRITES=false`.
+4. Đảm bảo schema staging khớp `prisma/schema.prisma`, **chỉ chạy migrations đã xét duyệt trên staging**. Không chạy db push hoặc reset vào production.
+5. Sau khi Netlify build thành công, mở `https://<your-preview-host>/api/health` và `https://<your-preview-host>/api/ready`.
+6. `/api/ready` chỉ trả `ready:true` khi PostgreSQL thực sự kết nối và có các bảng ERP bắt buộc. `productionReady:false` là có chủ ý khi còn thiếu các API nghiệp vụ.
+7. Đăng nhập bằng tài khoản PostgreSQL thật, kiểm tra tải dữ liệu. Các thao tác chưa chuyển khỏi local hoặc D1 sẽ bị khóa.
+
+### Trạng thái hỗ trợ
+
+- CI đã kiểm tra nhập/xuất kho, công nợ và bút toán bằng **PostgreSQL Docker riêng**, không chỉ mock.
+- Đăng nhập ERP và truy vấn dữ liệu đọc chạy qua Hono Prisma Netlify.
+- Nhập/xuất kho, danh mục và thanh toán dùng transaction PostgreSQL nhưng **quyền ghi tắt mặc định**.
+- Webshop customer registration/auth, checkout, reversal, và nhiều thao tác trên giao diện ERP chưa hoàn thành. Không bật quyền ghi và không cho khách dùng bản preview để kinh doanh thật.
+
+### Dấu hiệu chưa được deploy thành công
+
+- `/api/health` trả trạng thái limited: chỉ xác nhận Function chạy, **không xác nhận database**.
+- `/api/ready` trả HTTP 503: cấu hình DATABASE_URL hoặc schema cần kiểm tra.
+- HTTP 401: thiếu hoặc sai phiên đăng nhập.
+- HTTP 501: endpoint chưa được chuyển sang PostgreSQL.
+- HTTP 503 cho mutation: chức năng còn tắt bởi feature flag.
+
+Không dán `DATABASE_URL`, mật khẩu PostgreSQL hoặc Supabase Service Role Key vào issue, Pull Request hay chat.
