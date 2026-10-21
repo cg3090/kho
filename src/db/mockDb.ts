@@ -50,6 +50,7 @@ import {
 import { broadcastNewOrder } from '../utils/orderNotifications';
 import { collection, doc, getDocs, setDoc, writeBatch } from 'firebase/firestore';
 import { firestore } from './firebaseDb';
+import { authFetch } from '../utils/authClient';
 
 // Default Chart of Accounts compliant with Circular 133/200
 const DEFAULT_COA: ChartOfAccount[] = [
@@ -189,10 +190,10 @@ export class MockDatabase {
   }
 
   constructor() {
-    this.loadFromStorage();
+    if (!import.meta.env.PROD) this.loadFromStorage();
     // Never auto-seed mock business data in constructor; strip any residual mock records
     this.purgeMockRecords();
-    this.ensureBaseCatalogs();
+    if (!import.meta.env.PROD) this.ensureBaseCatalogs();
   }
 
   public ensureBaseCatalogs() {
@@ -694,11 +695,12 @@ export class MockDatabase {
     try {
       const val = this[key];
       if (val === undefined || typeof val === 'function') return;
-      await fetch(`/api/db/collection/${String(key)}`, {
+      const response = await authFetch(`/api/db/collection/${String(key)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: val }),
       });
+      if (!response.ok) throw new Error(`PostgreSQL rejected ${String(key)} (${response.status})`);
     } catch (e) {
       console.warn(`Lưu PostgreSQL (${String(key)}) thất bại:`, e);
     }
@@ -721,11 +723,12 @@ export class MockDatabase {
       collections[String(key)] = val;
     }
     try {
-      await fetch('/api/db/sync-all', {
+      const response = await authFetch('/api/db/sync-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ collections }),
       });
+      if (!response.ok) throw new Error(`PostgreSQL sync rejected (${response.status})`);
     } catch (e) {
       console.warn('Đồng bộ hàng loạt lên PostgreSQL chưa hoàn tất:', e);
     }
@@ -772,7 +775,7 @@ export class MockDatabase {
   async loadFromPostgres(): Promise<boolean> {
     try {
       const activeEngine = typeof window !== 'undefined' ? localStorage.getItem('wms_active_db_engine') || 'supabase' : 'supabase';
-      const statusRes = await fetch(`/api/db/status?engine=${activeEngine}`, {
+      const statusRes = await authFetch(`/api/db/status?engine=${activeEngine}`, {
         headers: { 'x-active-engine': activeEngine },
       });
       if (!statusRes.ok) return false;
@@ -780,7 +783,7 @@ export class MockDatabase {
       this.postgresConnectionInfo = statusJson;
       if (!statusJson.connected) return false;
 
-      const stateRes = await fetch('/api/db/state');
+      const stateRes = await authFetch('/api/db/state');
       if (!stateRes.ok) return false;
       const stateJson = await stateRes.json();
       if (!stateJson.connected && !stateJson.success) return false;
@@ -1034,6 +1037,18 @@ export class MockDatabase {
           await this.saveAllToPostgres();
         }
         if (onStatusChange) onStatusChange('synced');
+        return;
+      }
+
+      // Hosted Netlify ERP is PostgreSQL-only. Never silently load stale local or
+      // Firebase data when Supabase is unavailable or a session is invalid.
+      if (import.meta.env.PROD) {
+        this.dataSource = 'local';
+        this.isRealDatabaseConnected = false;
+        this.clearBusinessCollections();
+        this.users = [];
+        this.roles = [];
+        if (onStatusChange) onStatusChange('error');
         return;
       }
 
