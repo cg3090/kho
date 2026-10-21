@@ -31,6 +31,7 @@ import {
   WebshopOrderItem,
   WebshopProductConfig,
   WebshopStoreConfig,
+  WebshopCustomerAccount,
   WebshopOrderStatus,
   WebshopPaymentMethod,
   WebshopPaymentStatus,
@@ -49,6 +50,7 @@ import {
 import { broadcastNewOrder } from '../utils/orderNotifications';
 import { collection, doc, getDocs, setDoc, writeBatch } from 'firebase/firestore';
 import { firestore } from './firebaseDb';
+import { authFetch } from '../utils/authClient';
 
 // Default Chart of Accounts compliant with Circular 133/200
 const DEFAULT_COA: ChartOfAccount[] = [
@@ -99,6 +101,8 @@ export class MockDatabase {
   quotations: Quotation[] = [];
   quotationDetails: QuotationDetail[] = [];
   webshopOrders: WebshopOrder[] = [];
+  /** Customer accounts have no backend persistence yet. Never fabricate sessions locally. */
+  webshopCustomerAccounts: WebshopCustomerAccount[] = [];
   webshopProductConfigs: WebshopProductConfig[] = [];
   fiscalClosings: FiscalYearClosing[] = [];
   webshopStoreConfig: WebshopStoreConfig = {
@@ -144,6 +148,7 @@ export class MockDatabase {
   // Real database connection tracking
   dataSource: 'postgres' | 'firebase' | 'local' = 'local';
   isRealDatabaseConnected: boolean = false;
+  remoteWritesEnabled: boolean = false;
   postgresConnectionInfo: {
     connected: boolean;
     host?: string;
@@ -186,10 +191,19 @@ export class MockDatabase {
   }
 
   constructor() {
-    this.loadFromStorage();
+    if (import.meta.env.PROD) {
+      // In hosted mode all organization/shop identity must come from PostgreSQL.
+      this.companyInfo = { name: '', taxCode: '', address: '', bankAccount: '', bankName: '', logoUrl: '' };
+      this.webshopStoreConfig = {
+        storeName: '', storeSlogan: '', hotline: '', email: '', address: '',
+        defaultWarehouseId: '', autoCreateStockOut: false, allowOrderWhenOutOfStock: false,
+        bankName: '', bankAccount: '', bankOwner: '',
+      };
+    }
+    if (!import.meta.env.PROD) this.loadFromStorage();
     // Never auto-seed mock business data in constructor; strip any residual mock records
     this.purgeMockRecords();
-    this.ensureBaseCatalogs();
+    if (!import.meta.env.PROD) this.ensureBaseCatalogs();
   }
 
   public ensureBaseCatalogs() {
@@ -618,6 +632,15 @@ export class MockDatabase {
   }
 
   save(key: keyof MockDatabase) {
+    if (import.meta.env.PROD) {
+      const catalogs = new Set(['categories', 'uoms', 'warehouses', 'suppliers', 'customers']);
+      if (!this.isRealDatabaseConnected || !this.remoteWritesEnabled || !catalogs.has(String(key))) {
+        throw new Error('Chức năng ghi dữ liệu này chưa được kích hoạt trên PostgreSQL. Không có dữ liệu nào được xác nhận lưu.');
+      }
+      void this.saveToPostgres(key);
+      this.notifyListeners();
+      return;
+    }
     if (Array.isArray(this[key])) {
       (this as any)[key] = [...(this[key] as any[])];
     }
@@ -691,17 +714,24 @@ export class MockDatabase {
     try {
       const val = this[key];
       if (val === undefined || typeof val === 'function') return;
-      await fetch(`/api/db/collection/${String(key)}`, {
+      const response = await authFetch(`/api/db/collection/${String(key)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: val }),
       });
+      if (!response.ok) throw new Error(`PostgreSQL rejected ${String(key)} (${response.status})`);
     } catch (e) {
       console.warn(`Lưu PostgreSQL (${String(key)}) thất bại:`, e);
+      if (import.meta.env.PROD) {
+        alert(`Không lưu được ${String(key)} lên PostgreSQL. Vui lòng kiểm tra Supabase và tải lại dữ liệu.`);
+        await this.loadFromPostgres();
+        this.notifyListeners();
+      }
     }
   }
 
   async saveAllToPostgres() {
+    if (import.meta.env.PROD) throw new Error('Không hỗ trợ đồng bộ hàng loạt từ trình duyệt lên PostgreSQL.');
     const keys: (keyof MockDatabase)[] = [
       'categories', 'uoms', 'warehouses', 'suppliers', 'customers', 'products',
       'accountMapping', 'coa', 'stockTransactions', 'stockTransactionDetails',
@@ -718,11 +748,12 @@ export class MockDatabase {
       collections[String(key)] = val;
     }
     try {
-      await fetch('/api/db/sync-all', {
+      const response = await authFetch('/api/db/sync-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ collections }),
       });
+      if (!response.ok) throw new Error(`PostgreSQL sync rejected (${response.status})`);
     } catch (e) {
       console.warn('Đồng bộ hàng loạt lên PostgreSQL chưa hoàn tất:', e);
     }
@@ -759,25 +790,28 @@ export class MockDatabase {
         this.deduplicateCollection(key, val);
       }
     }
-    if (this.coa.length === 0) this.coa = [...DEFAULT_COA];
-    if (this.accountMapping.length === 0) this.accountMapping = [...DEFAULT_MAPPING];
-    if (this.roles.length === 0) this.roles = JSON.parse(JSON.stringify(DEFAULT_ROLES));
-    if (this.users.length === 0) this.users = JSON.parse(JSON.stringify(DEFAULT_USERS));
-    this.purgeMockRecords();
+    if (!import.meta.env.PROD) {
+      if (this.coa.length === 0) this.coa = [...DEFAULT_COA];
+      if (this.accountMapping.length === 0) this.accountMapping = [...DEFAULT_MAPPING];
+      if (this.roles.length === 0) this.roles = JSON.parse(JSON.stringify(DEFAULT_ROLES));
+      if (this.users.length === 0) this.users = JSON.parse(JSON.stringify(DEFAULT_USERS));
+      this.purgeMockRecords();
+    }
   }
 
   async loadFromPostgres(): Promise<boolean> {
     try {
       const activeEngine = typeof window !== 'undefined' ? localStorage.getItem('wms_active_db_engine') || 'supabase' : 'supabase';
-      const statusRes = await fetch(`/api/db/status?engine=${activeEngine}`, {
+      const statusRes = await authFetch(`/api/db/status?engine=${activeEngine}`, {
         headers: { 'x-active-engine': activeEngine },
       });
       if (!statusRes.ok) return false;
       const statusJson = await statusRes.json();
       this.postgresConnectionInfo = statusJson;
-      if (!statusJson.connected) return false;
+      this.remoteWritesEnabled = Boolean(statusJson.businessMutationsEnabled);
+      if (!statusJson.connected || (import.meta.env.PROD && statusJson.schemaReady === false)) return false;
 
-      const stateRes = await fetch('/api/db/state');
+      const stateRes = await authFetch('/api/db/state');
       if (!stateRes.ok) return false;
       const stateJson = await stateRes.json();
       if (!stateJson.connected && !stateJson.success) return false;
@@ -1024,13 +1058,25 @@ export class MockDatabase {
       if (pgConnected) {
         this.dataSource = 'postgres';
         this.isRealDatabaseConnected = true;
-        const hadMock = this.purgeMockRecords();
-        this.ensureDefaultWebshopConfigs();
-        this.saveAllToLocalStorage();
-        if (hadMock) {
-          await this.saveAllToPostgres();
+        if (!import.meta.env.PROD) {
+          const hadMock = this.purgeMockRecords();
+          this.ensureDefaultWebshopConfigs();
+          this.saveAllToLocalStorage();
+          if (hadMock) await this.saveAllToPostgres();
         }
         if (onStatusChange) onStatusChange('synced');
+        return;
+      }
+
+      // Hosted Netlify ERP is PostgreSQL-only. Never silently load stale local or
+      // Firebase data when Supabase is unavailable or a session is invalid.
+      if (import.meta.env.PROD) {
+        this.dataSource = 'local';
+        this.isRealDatabaseConnected = false;
+        this.clearBusinessCollections();
+        this.users = [];
+        this.roles = [];
+        if (onStatusChange) onStatusChange('error');
         return;
       }
 
@@ -1063,6 +1109,7 @@ export class MockDatabase {
   }
 
   saveAll() {
+    if (import.meta.env.PROD) throw new Error('Đồng bộ toàn bộ dữ liệu chưa được hỗ trợ trên bản hosted.');
     this.saveAllToLocalStorage();
     if (this.dataSource === 'postgres') {
       this.saveAllToPostgres();
@@ -1135,6 +1182,7 @@ export class MockDatabase {
   }
 
   resetDatabase() {
+    if (import.meta.env.PROD) throw new Error('Không được reset database qua trình duyệt.');
     localStorage.clear();
     this.clearBusinessCollections();
     this.accountMapping = [...DEFAULT_MAPPING];
@@ -1193,6 +1241,40 @@ export class MockDatabase {
     }
   }
 
+  // Safety boundary: storefront account mutations must go through a persistent
+  // authenticated backend. These APIs fail explicitly until that migration exists.
+  getCurrentWebshopCustomer(): WebshopCustomerAccount | null { return null; }
+
+  loginWebshopCustomer(_username: string, _password: string): { success: boolean; account?: WebshopCustomerAccount; message: string } {
+    return { success: false, message: 'Tài khoản Webshop chưa được kết nối với Supabase. Đăng nhập đang tạm khóa.' };
+  }
+
+  registerWebshopCustomer(_input: {
+    username: string; email: string; phone: string; fullName: string; address: string; password: string
+  }): { success: boolean; account?: WebshopCustomerAccount; message: string } {
+    return { success: false, message: 'Đăng ký Webshop tạm khóa cho đến khi backend Supabase được triển khai.' };
+  }
+
+  logoutWebshopCustomer(): void { /* no local customer session exists */ }
+
+  toggleWishlistProduct(_productId: string): { success: boolean; message: string } {
+    return { success: false, message: 'Yêu thích sản phẩm cần tài khoản Webshop lưu trên Supabase.' };
+  }
+
+  updateWebshopCustomerProfile(_id: string, _patch: Partial<WebshopCustomerAccount>): {
+    success: boolean; account?: WebshopCustomerAccount; message: string
+  } {
+    return { success: false, message: 'Chưa hỗ trợ cập nhật tài khoản Webshop qua PostgreSQL.' };
+  }
+
+  deleteWebshopCustomer(_id: string): { success: boolean; message: string } {
+    return { success: false, message: 'Xóa tài khoản Webshop yêu cầu API Supabase có kiểm tra quyền.' };
+  }
+
+  resetWebshopCustomerPassword(_id: string, _password: string): { success: boolean; message: string } {
+    return { success: false, message: 'Đặt lại mật khẩu Webshop yêu cầu backend xác thực.' };
+  }
+
   createWebshopOrder(input: {
     customerName: string;
     customerPhone: string;
@@ -1202,6 +1284,7 @@ export class MockDatabase {
     shippingMethod?: 'STANDARD' | 'EXPRESS' | 'STORE_PICKUP';
     paymentMethod: WebshopPaymentMethod;
     paymentStatus?: WebshopPaymentStatus;
+    accountId?: string;
     items: {
       productId: string;
       qty: number;

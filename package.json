@@ -27,7 +27,15 @@
     "prisma:pull": "prisma db pull",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "test:security": "tsx --test tests/session.test.ts",
+    "test:api": "tsx --test tests/netlify-postgres.test.ts",
+    "build:api:check": "esbuild netlify/functions/api.ts --bundle --platform=node --format=esm --packages=external --outfile=/tmp/kho-netlify-api-check.js",
+    "test:payment": "tsx --test tests/postgres-payment.test.ts",
+    "test:password": "tsx --test tests/postgres-password.test.ts",
+    "test:netlify": "tsx --test tests/netlify-function.test.ts",
+    "test:stock": "tsx --test tests/postgres-stock.test.ts",
+    "test:postgres:integration": "tsx --test tests/postgres-integration.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -52,6 +52,7 @@ import { applyThemeColor } from './utils/theme';
 import { canViewPurchaseCost, canAccessTab, getDefaultTabForUser } from './utils/rbac';
 import { subscribeToNewOrders } from './utils/orderNotifications';
 import { WebshopOrder } from './types';
+import { serverLogout } from './utils/authClient';
 
 // Tự động lấy Tháng / Năm hiện tại của hệ thống
 const now = new Date();
@@ -171,6 +172,10 @@ export default function App() {
   }, [orderToast]);
 
   const handleResetDb = () => {
+    if (import.meta.env.PROD) {
+      alert('Không hỗ trợ đặt lại cơ sở dữ liệu production từ trình duyệt.');
+      return;
+    }
     dbRef.current.resetDatabase();
     forceUpdate();
     setActiveTab('dashboard');
@@ -178,11 +183,18 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    if (import.meta.env.PROD) void serverLogout();
     dbRef.current.logout();
     forceUpdate();
   };
 
   const handleSwitchUser = (username: string) => {
+    // Only the local development simulator may switch accounts without credentials.
+    if (import.meta.env.PROD) {
+      setShowSwitchUserModal(false);
+      alert('Để đổi người dùng, hãy đăng xuất và đăng nhập lại bằng tài khoản trên Supabase.');
+      return;
+    }
     dbRef.current.login(username, '');
     setShowSwitchUserModal(false);
     forceUpdate();
@@ -235,7 +247,10 @@ export default function App() {
     return (
       <Login
         db={db}
-        onLoginSuccess={forceUpdate}
+        onLoginSuccess={() => {
+          setSyncStatus('synced');
+          forceUpdate();
+        }}
         onBackToShop={handleSwitchToShop}
       />
     );

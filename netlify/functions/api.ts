@@ -1,62 +1,41 @@
-import { app } from '../../src/server/app';
+/** Netlify request adapter backed exclusively by Supabase PostgreSQL. */
+import { postgresApi } from '../../src/server/netlifyPostgresApp';
 
-const getEventUrl = (event) => {
+export const handler = async (event: any) => {
   const host = event.headers?.host || 'localhost';
-  const path = event.path || '/';
   const protocol = event.headers?.['x-forwarded-proto'] || 'https';
-  const query = event.queryStringParameters && Object.keys(event.queryStringParameters).length
-    ? `?${new URLSearchParams(event.queryStringParameters).toString()}`
-    : '';
-
-  return `${protocol}://${host}${path}${query}`;
-};
-
-export const handler = async (event) => {
+  const originalPath = String(event.path || '/');
+  const rest = event.queryStringParameters?.path;
+  const pathname = typeof rest === 'string'
+    ? '/api/' + rest.replace(/^\/+/, '')
+    : originalPath.startsWith('/.netlify/functions/api/')
+      ? '/api/' + originalPath.slice('/.netlify/functions/api/'.length)
+      : originalPath;
+  const params = new URLSearchParams(event.queryStringParameters || {});
+  params.delete('path');
+  const url = new URL(pathname + (params.size ? '?' + params.toString() : ''), protocol + '://' + host);
   try {
-    const url = getEventUrl(event);
-    const method = event.httpMethod || 'GET';
+    const method = (event.httpMethod || 'GET').toUpperCase();
     const headers = new Headers(event.headers || {});
-
-    let body;
-    if (event.body && !['GET', 'HEAD'].includes(method)) {
-      body = event.isBase64Encoded ? Buffer.from(event.body, 'base64') : event.body;
-    }
-
-    const request = new Request(url, {
-      method,
-      headers,
-      body,
-      duplex: 'half',
-    });
-
-    const response = await app.fetch(request, {
-      ...process.env,
-      NODE_ENV: process.env.NODE_ENV || 'production',
-    });
-
+    const body = !['GET', 'HEAD'].includes(method) && event.body
+      ? (event.isBase64Encoded ? Buffer.from(event.body, 'base64') : event.body)
+      : undefined;
+    const request = new Request(url, { method, headers, body });
+    const response = await postgresApi.fetch(request);
+    const responseBody = Buffer.from(await response.arrayBuffer());
     const responseHeaders = Object.fromEntries(response.headers.entries());
     return {
       statusCode: response.status,
-      headers: responseHeaders,
-      body: await response.text(),
-      isBase64Encoded: false,
+      headers: { ...responseHeaders, 'Cache-Control': 'no-store' },
+      body: responseBody.toString('base64'),
+      isBase64Encoded: true,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unexpected Netlify API error';
+    console.error('Netlify API handler failure', error);
     return {
       statusCode: 500,
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-      },
-      body: JSON.stringify({
-        success: false,
-        connected: false,
-        error: message,
-      }),
-      isBase64Encoded: false,
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ success: false, error: 'Internal API error' }),
     };
   }
 };

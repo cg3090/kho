@@ -55,6 +55,7 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit): P
  * Internal check for server auth mode
  */
 function checkServerAuth(): boolean {
+  if (import.meta.env.PROD) return true;
   if (typeof window === 'undefined') return false;
   try {
     return Boolean(getAuthToken());
@@ -91,6 +92,7 @@ export async function serverListUsers(): Promise<User[]> {
     // ignore
   }
 
+  if (import.meta.env.PROD) return [];
   try {
     const saved = localStorage.getItem('wms_db_users');
     if (saved) {
@@ -350,6 +352,9 @@ export async function serverChangePassword(
     // ignore
   }
 
+  // Never claim a server password change succeeded when hosted API rejects it.
+  if (import.meta.env.PROD) return { success: false, error: 'Không thể đổi mật khẩu trên máy chủ; dữ liệu chưa thay đổi.' };
+
   // Local storage / fallback update
   try {
     const updatedUser = updateCachedUserPassword(userId, newPassword);
@@ -406,6 +411,7 @@ export async function serverGetRoles(): Promise<Role[]> {
   } catch {
     // ignore
   }
+  if (import.meta.env.PROD) return [];
   try {
     const saved = localStorage.getItem('wms_db_roles');
     if (saved) {
@@ -450,6 +456,7 @@ export async function getCurrentServerUser(): Promise<User | null> {
   } catch {
     // ignore
   }
+  if (import.meta.env.PROD) return null;
   try {
     const cached = localStorage.getItem(AUTH_USER_KEY);
     if (cached) return JSON.parse(cached);
@@ -528,7 +535,7 @@ export async function initAuth(
     }
   }
 
-  if (!user) {
+  if (!user && !import.meta.env.PROD) {
     try {
       const cached = localStorage.getItem(AUTH_USER_KEY) || localStorage.getItem('wms_currentUser');
       if (cached) {

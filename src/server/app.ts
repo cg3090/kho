@@ -21,6 +21,7 @@ import { executeStockTransaction } from './services/stockTransactionService';
 import { executePaymentTransaction } from './services/paymentService';
 import { executeCreateWebshopOrder } from './services/webshopOrderService';
 import { testPostgresConnection } from './services/postgresService';
+import { createSession, verifySession } from './security/session';
 
 export const app = new Hono<{ Bindings: CloudflareEnv }>();
 
@@ -174,6 +175,31 @@ app.get('/api/db/status', async (c) => {
   }
 });
 
+
+app.use('/api/*', async (c, next) => {
+  if (c.req.method === 'OPTIONS') return next();
+  if (c.req.path === '/api/health' || (c.req.path === '/api/auth/login' && c.req.method === 'POST')) return next();
+  const auth = c.req.header('Authorization') || '';
+  if (!auth.startsWith('Bearer ')) return c.json({ error: 'Authentication required' }, 401);
+  const session = await verifySession(auth.slice(7), c.env);
+  if (!session) return c.json({ error: 'Invalid or expired session' }, 401);
+  try {
+    const db = getDb(c.env);
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, session.sub)).limit(1);
+    if (!user || user.status !== 'ACTIVE') return c.json({ error: 'Account inactive or missing' }, 403);
+    const roleId = String(user.roleId || '');
+    const adminOnly = ['/api/db/connect', '/api/db/disconnect', '/api/db/purge-mock', '/api/db/schema-sql', '/api/db/schema-prisma'].includes(c.req.path) ||
+      c.req.path.startsWith('/api/prisma/') || c.req.path === '/api/users' ||
+      c.req.path.startsWith('/api/users/') || c.req.path === '/api/roles';
+    if (adminOnly && roleId !== 'ADMIN') return c.json({ error: 'Administrator role required' }, 403);
+    c.set('authenticatedUserId' as never, user.id as never);
+    c.set('authenticatedRole' as never, roleId as never);
+    return next();
+  } catch {
+    return c.json({ error: 'Unable to verify user session' }, 503);
+  }
+});
+
 // =========================================================================
 // AUTHENTICATION ROUTES (DATA THẬT TỪ BẢNG USERS)
 // =========================================================================
@@ -243,7 +269,7 @@ app.post('/api/auth/login', async (c) => {
       } : undefined,
     };
 
-    const token = `cf-token-${user.id}-${Date.now()}`;
+    const token = await createSession(user.id, user.roleId || '', c.env);
 
     return c.json({
       success: true,
@@ -262,25 +288,11 @@ app.get('/api/auth/me', async (c) => {
     if (!authHeader) {
       return c.json({ error: 'Chưa đăng nhập' }, 401);
     }
-    const token = authHeader.replace(/^Bearer\s+/i, '');
-    const parts = token.split('-');
-    const userId = parts[2];
-
+    const payload = await verifySession(authHeader.replace(/^Bearer\s+/i, ''), c.env);
+    if (!payload) return c.json({ error: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn' }, 401);
     const db = getDb(c.env);
-    let user = null;
-    if (userId) {
-      const [u] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
-      user = u;
-    }
-
-    if (!user) {
-      const [admin] = await db.select().from(schema.users).where(eq(schema.users.roleId, 'ADMIN')).limit(1);
-      user = admin;
-    }
-
-    if (!user) {
-      return c.json({ error: 'Không tìm thấy tài khoản người dùng' }, 404);
-    }
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, payload.sub)).limit(1);
+    if (!user || user.status !== 'ACTIVE') return c.json({ error: 'Tài khoản không hoạt động' }, 403);
 
     return c.json({
       id: user.id,
@@ -305,8 +317,15 @@ app.post('/api/auth/logout', (c) => {
 const handlePasswordChange = async (c: any) => {
   try {
     const body = await c.req.json();
-    const userId = c.req.param('id') || body.userId;
     const { oldPassword, newPassword } = body;
+    const userId = c.req.param('id') || body.userId || c.get('authenticatedUserId' as never);
+    if (String(userId) !== String(c.get('authenticatedUserId' as never)) && c.get('authenticatedRole' as never) !== 'ADMIN') {
+      return c.json({ success: false, error: 'Không được đổi mật khẩu tài khoản khác' }, 403);
+    }
+    if (!oldPassword && c.get('authenticatedRole' as never) !== 'ADMIN') {
+      return c.json({ success: false, error: 'Yêu cầu mật khẩu hiện tại' }, 400);
+    }
+
 
     if (!userId || !newPassword) {
       return c.json({ success: false, error: 'Vui lòng cung cấp mật khẩu mới' }, 400);
