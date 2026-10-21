@@ -11,6 +11,7 @@ import { createPostgresPayment } from './services/postgresPaymentService';
 import { savePostgresCatalog, CatalogValidationError } from './services/postgresCatalogService';
 
 const api = new Hono();
+const writesEnabled = () => process.env.ENABLE_POSTGRES_WRITES === 'true';
 let prisma: PrismaClient | undefined;
 
 export const database = () => {
@@ -38,7 +39,7 @@ const safeUser = (u: any) => ({
 api.get('/api/health', (c) => c.json({
   status: 'ok', runtime: 'Netlify PostgreSQL',
   storage: 'Supabase PostgreSQL', mode: 'read-only-business',
-  businessMutationsEnabled: false,
+  businessMutationsEnabled: writesEnabled(),
 }));
 
 // Login is the only public data endpoint; do not ship default credentials.
@@ -102,7 +103,7 @@ api.get('/api/db/status', async (c) => {
       connected: true, success: true, engine: 'supabase',
       driver: 'postgresql', database: 'PostgreSQL',
       tableCount: Number(count[0]?.count || 0),
-      businessMutationsEnabled: false,
+      businessMutationsEnabled: writesEnabled(),
     });
   } catch (error) {
     console.error('PostgreSQL health check failed', error);
@@ -167,6 +168,7 @@ api.get('/api/webshop/orders', async (c) => {
 });
 
 api.post('/api/db/collection/:key', async (c) => {
+  if (!writesEnabled()) return c.json({ error: 'PostgreSQL writes are disabled by deployment configuration' }, 503);
   if (c.get('user').roleId !== 'ADMIN') return c.json({ error: 'Administrator required' }, 403);
   const body = await c.req.json().catch(() => ({}));
   const value = body.data !== undefined ? body.data : body.value;
@@ -184,6 +186,7 @@ api.post('/api/db/collection/:key', async (c) => {
 // Accounting payments use a single PostgreSQL transaction and row-level debt lock.
 // Keep restricted to ADMIN until granular accounting permissions have been verified.
 api.post('/api/payments', async (c) => {
+  if (!writesEnabled()) return c.json({ error: 'PostgreSQL writes are disabled by deployment configuration' }, 503);
   if (c.get('user').roleId !== 'ADMIN') return c.json({ error: 'Administrator required for payments' }, 403);
   const body = await c.req.json().catch(() => null);
   try {
