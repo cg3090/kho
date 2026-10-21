@@ -34,7 +34,8 @@
     "test:payment": "tsx --test tests/postgres-payment.test.ts",
     "test:password": "tsx --test tests/postgres-password.test.ts",
     "test:netlify": "tsx --test tests/netlify-function.test.ts",
-    "test:stock": "tsx --test tests/postgres-stock.test.ts"
+    "test:stock": "tsx --test tests/postgres-stock.test.ts",
+    "test:postgres:integration": "tsx --test tests/postgres-integration.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
