@@ -92,6 +92,7 @@ export async function serverListUsers(): Promise<User[]> {
     // ignore
   }
 
+  if (import.meta.env.PROD) return [];
   try {
     const saved = localStorage.getItem('wms_db_users');
     if (saved) {
@@ -410,6 +411,7 @@ export async function serverGetRoles(): Promise<Role[]> {
   } catch {
     // ignore
   }
+  if (import.meta.env.PROD) return [];
   try {
     const saved = localStorage.getItem('wms_db_roles');
     if (saved) {
@@ -454,6 +456,7 @@ export async function getCurrentServerUser(): Promise<User | null> {
   } catch {
     // ignore
   }
+  if (import.meta.env.PROD) return null;
   try {
     const cached = localStorage.getItem(AUTH_USER_KEY);
     if (cached) return JSON.parse(cached);
