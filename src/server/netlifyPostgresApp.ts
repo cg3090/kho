@@ -10,7 +10,7 @@ import { loadFullStateViaPrisma } from '../db/prismaClient';
 import { createPostgresPayment } from './services/postgresPaymentService';
 import { savePostgresCatalog, CatalogValidationError } from './services/postgresCatalogService';
 
-const api = new Hono();
+const api = new Hono<{ Variables: { user: ReturnType<typeof safeUser> } }>();
 const writesEnabled = () => process.env.ENABLE_POSTGRES_WRITES === 'true';
 let prisma: PrismaClient | undefined;
 
@@ -90,8 +90,8 @@ api.post('/api/auth/login', async (c) => {
 api.use('/api/*', async (c, next) => {
   if (c.req.method === 'OPTIONS') return c.body(null, 204);
   const header = c.req.header('Authorization') || '';
-  if (!/^Bearer\\s+/i.test(header)) return c.json({ error: 'Authentication required' }, 401);
-  const payload = await verifySession(header.replace(/^Bearer\\s+/i, ''), process.env);
+  if (!/^Bearer\s+/i.test(header)) return c.json({ error: 'Authentication required' }, 401);
+  const payload = await verifySession(header.replace(/^Bearer\s+/i, ''), process.env);
   if (!payload) return c.json({ error: 'Invalid or expired session' }, 401);
   try {
     const user = await database().user.findUnique({ where: { id: payload.sub } });
