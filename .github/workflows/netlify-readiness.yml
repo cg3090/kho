@@ -20,5 +20,9 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Test signed API sessions
         run: npm run test:security
+      - name: Test Netlify PostgreSQL API boundaries
+        run: npm run test:api
+      - name: Compile Netlify API entry
+        run: npm run build:api:check
       - name: Build frontend
         run: npm run build
