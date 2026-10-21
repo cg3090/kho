@@ -31,7 +31,8 @@
     "test:security": "tsx --test tests/session.test.ts",
     "test:api": "tsx --test tests/netlify-postgres.test.ts",
     "build:api:check": "esbuild netlify/functions/api.ts --bundle --platform=node --format=esm --packages=external --outfile=/tmp/kho-netlify-api-check.js",
-    "test:payment": "tsx --test tests/postgres-payment.test.ts"
+    "test:payment": "tsx --test tests/postgres-payment.test.ts",
+    "test:password": "tsx --test tests/postgres-password.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
