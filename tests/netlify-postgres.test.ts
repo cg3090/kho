@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { postgresApi } from '../src/server/netlifyPostgresApp';
+import { createPostgresPayment } from '../src/server/services/postgresPaymentService';
+import { savePostgresCatalog } from '../src/server/services/postgresCatalogService';
 
 test('health endpoint clearly reports limited functionality', async () => {
   const result = await postgresApi.request('http://localhost/api/health');
@@ -24,4 +26,27 @@ test('malformed login rejected without touching database', async () => {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: '' }),
   });
   assert.equal(result.status, 400);
+});
+
+test('invalid payment rejected before database access', async () => {
+  await assert.rejects(
+    () => createPostgresPayment(null as any, {
+      type: 'RECEIVE', partnerId: 'c-1', partnerType: 'CUSTOMER',
+      amount: -5, method: 'CASH', referenceNo: 'PT-1',
+    }),
+    /thanh toán không hợp lệ/
+  );
+});
+
+test('duplicate catalog IDs rejected before database access', async () => {
+  await assert.rejects(
+    () => savePostgresCatalog(null as any, 'categories', [
+      { id: 'c-1', name: 'A' }, { id: 'c-1', name: 'B' },
+    ]),
+    /ID bị trùng/
+  );
+});
+
+test('unsupported catalog mutations fail closed', async () => {
+  await assert.rejects(() => savePostgresCatalog(null as any, 'stockTransactions', []), /chưa được hỗ trợ/);
 });
