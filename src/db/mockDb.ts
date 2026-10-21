@@ -765,11 +765,13 @@ export class MockDatabase {
         this.deduplicateCollection(key, val);
       }
     }
-    if (this.coa.length === 0) this.coa = [...DEFAULT_COA];
-    if (this.accountMapping.length === 0) this.accountMapping = [...DEFAULT_MAPPING];
-    if (this.roles.length === 0) this.roles = JSON.parse(JSON.stringify(DEFAULT_ROLES));
-    if (this.users.length === 0) this.users = JSON.parse(JSON.stringify(DEFAULT_USERS));
-    this.purgeMockRecords();
+    if (!import.meta.env.PROD) {
+      if (this.coa.length === 0) this.coa = [...DEFAULT_COA];
+      if (this.accountMapping.length === 0) this.accountMapping = [...DEFAULT_MAPPING];
+      if (this.roles.length === 0) this.roles = JSON.parse(JSON.stringify(DEFAULT_ROLES));
+      if (this.users.length === 0) this.users = JSON.parse(JSON.stringify(DEFAULT_USERS));
+      this.purgeMockRecords();
+    }
   }
 
   async loadFromPostgres(): Promise<boolean> {
@@ -1030,11 +1032,11 @@ export class MockDatabase {
       if (pgConnected) {
         this.dataSource = 'postgres';
         this.isRealDatabaseConnected = true;
-        const hadMock = this.purgeMockRecords();
-        this.ensureDefaultWebshopConfigs();
-        this.saveAllToLocalStorage();
-        if (hadMock) {
-          await this.saveAllToPostgres();
+        if (!import.meta.env.PROD) {
+          const hadMock = this.purgeMockRecords();
+          this.ensureDefaultWebshopConfigs();
+          this.saveAllToLocalStorage();
+          if (hadMock) await this.saveAllToPostgres();
         }
         if (onStatusChange) onStatusChange('synced');
         return;
