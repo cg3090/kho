@@ -165,8 +165,8 @@ export async function createPostgresStockTransaction(db: PrismaClient, input: St
       await tx.journalEntry.create({
         data: {
           id: entryId, date, referenceNo: reference, description, fiscalYear: year,
-          lines: { create: lines.map((l, idx) => ({
-            id: 'jel-' + entryId + '-' + (idx + 1),
+          lines: { create: lines.map((l) => ({
+            id: 'jl-' + crypto.randomUUID(),
             accountCode: l.account, debit: l.debit, credit: l.credit,
             partnerId: l.partnerId || null, partnerType: l.partnerType || null,
           })) },
