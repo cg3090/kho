@@ -8,6 +8,7 @@ import { createSession, verifySession } from './security/session';
 import { verifyPassword } from '../utils/password';
 import { loadFullStateViaPrisma } from '../db/prismaClient';
 import { createPostgresPayment } from './services/postgresPaymentService';
+import { savePostgresCatalog, CatalogValidationError } from './services/postgresCatalogService';
 
 const api = new Hono();
 let prisma: PrismaClient | undefined;
@@ -162,6 +163,21 @@ api.get('/api/webshop/orders', async (c) => {
     return c.json(await database().webshopOrder.findMany({ include: { items: true }, orderBy: { date: 'desc' } }));
   } catch {
     return c.json({ error: 'Database unavailable' }, 503);
+  }
+});
+
+api.post('/api/db/collection/:key', async (c) => {
+  if (c.get('user').roleId !== 'ADMIN') return c.json({ error: 'Administrator required' }, 403);
+  const body = await c.req.json().catch(() => ({}));
+  const value = body.data !== undefined ? body.data : body.value;
+  try {
+    return c.json(await savePostgresCatalog(database(), c.req.param('key'), value));
+  } catch (error) {
+    if (error instanceof CatalogValidationError) {
+      return c.json({ success: false, error: error.message }, 400);
+    }
+    console.error('PostgreSQL catalog transaction failed', error);
+    return c.json({ success: false, error: 'Catalog transaction failed or conflicted' }, 503);
   }
 });
 
