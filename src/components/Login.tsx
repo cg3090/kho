@@ -38,6 +38,13 @@ const attemptLogin = async (loginUser: string, loginPass: string) => {
         ? await serverLogin(loginUser, loginPass)
         : await db.login(loginUser, loginPass);
       if (res.success && res.user) {
+        db.setCurrentUser(res.user);
+        await db.syncWithFirebase();
+        if (import.meta.env.PROD && !db.isRealDatabaseConnected) {
+          db.setCurrentUser(null);
+          setErrorMsg('Đăng nhập thành công nhưng không tải được dữ liệu PostgreSQL. Vui lòng kiểm tra cấu hình Supabase.');
+          return;
+        }
         onLoginSuccess(res.user);
       } else {
         const msg = (res as any).message || (res as any).error || 'Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.';
