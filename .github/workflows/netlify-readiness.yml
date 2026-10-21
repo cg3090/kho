@@ -30,7 +30,7 @@ jobs:
         run: npm run build:api:check
       - name: Test Netlify function routing
         run: npm run test:netlify
-      - name: Check TypeScript
-        run: npm run lint
       - name: Build frontend
         run: npm run build
+      - name: Check TypeScript
+        run: npm run lint
