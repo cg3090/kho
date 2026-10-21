@@ -48,10 +48,26 @@ const safeUser = (u: any) => ({
 });
 
 api.get('/api/health', (c) => c.json({
-  status: 'ok', runtime: 'Netlify PostgreSQL',
-  storage: 'Supabase PostgreSQL', mode: 'read-only-business',
+  status: 'limited', runtime: 'Netlify PostgreSQL',
+  storage: 'Supabase PostgreSQL', mode: 'staging',
   businessMutationsEnabled: writesEnabled(),
+  productionReady: false,
 }));
+
+// Public readiness check returns only health status, never credentials, SQL or records.
+api.get('/api/ready', async (c) => {
+  try {
+    await database().$queryRaw`SELECT 1`;
+    const schema = await inspectSchema(database());
+    if (schema.missingTables.length) {
+      return c.json({ ready: false, databaseConnected: true, schemaReady: false }, 503);
+    }
+    return c.json({ ready: true, databaseConnected: true, schemaReady: true, productionReady: false });
+  } catch (error) {
+    console.error('PostgreSQL readiness check failed', error);
+    return c.json({ ready: false, databaseConnected: false, schemaReady: false }, 503);
+  }
+});
 
 // Login is the only public data endpoint; do not ship default credentials.
 api.post('/api/auth/login', async (c) => {
