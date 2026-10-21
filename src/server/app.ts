@@ -294,9 +294,6 @@ app.get('/api/auth/me', async (c) => {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, payload.sub)).limit(1);
     if (!user || user.status !== 'ACTIVE') return c.json({ error: 'Tài khoản không hoạt động' }, 403);
 
-    return c.json({ error: 'Không tìm thấy tài khoản người dùng' }, 404);
-    }
-
     return c.json({
       id: user.id,
       username: user.username,
