@@ -1,0 +1,24 @@
+name: Netlify deploy readiness checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [fix/netlify-supabase-deployment-audit]
+
+jobs:
+  build-and-security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Test signed API sessions
+        run: npm run test:security
+      - name: Build frontend
+        run: npm run build
