@@ -8,7 +8,8 @@
 - **Không sử dụng Cloudflare D1 hoặc SQLite để lưu dữ liệu trên Netlify.**
 - API đọc: đăng nhập, xác thực phiên, `/api/db/status`, `/api/db/state`, users (ADMIN), roles, webshop orders.
 - API ghi đã chuyển: thu/chi (`/api/payments`) và một số danh mục (`/api/db/collection/:key` cho categories, uoms, warehouses, suppliers, customers).
-- **Chưa chuyển:** nhập/xuất kho, đảo/hủy, kế toán và orders mutation; những endpoint này trả HTTP 501 để tránh âm thầm ghi sai database.
+- Đã viết transaction PostgreSQL cho nhập/xuất kho (tồn kho, công nợ, VAT, bút toán), **tắt riêng theo mặc định** vì chưa thử với Supabase staging; các trường hợp trả trước được từ chối rõ ràng.
+- **Chưa chuyển:** đảo/hủy chứng từ, hoàn tất quy trình Webshop và một số nghiệp vụ kế toán; những endpoint này trả HTTP 501.
 
 ## Biến môi trường cấu hình trong Netlify
 
@@ -17,6 +18,7 @@
 | `DATABASE_URL` | Functions (+ Builds nếu Prisma generate cần) | Lấy từ Supabase Connect → Transaction Pooler. URL phải có user/password đúng và SSL. |
 | `JWT_SECRET` | Functions | Chuỗi bí mật đủ mạnh từ trình tạo ngẫu nhiên, ít nhất 32 ký tự. Không dùng tiền tố `VITE_`. |
 | `ENABLE_POSTGRES_WRITES` | Functions | Mặc định `false`. Chỉ chuyển `true` trong STAGING sau khi có sao lưu và kiểm thử. |
+| `ENABLE_POSTGRES_STOCK_WRITES` | Functions | Mặc định `false`. Cần bật cùng biến trên để cho phép nhập/xuất kho khi đã kiểm tra transaction thực tế. |
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | Builds (chỉ khi frontend dùng Supabase SDK) | Key public, đảm bảo RLS. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Functions (nếu cần sau này) | Không đưa vào frontend, hiện API này không dùng. |
 
@@ -29,7 +31,7 @@
 3. Tạo user thực tế trong bảng users bằng mật khẩu mạnh; **không dùng mật khẩu mặc định 123**. Di chuyển mật khẩu cũ qua cơ chế hash mạnh và rà soát phân quyền.
 4. Thử đăng nhập và `/api/db/state`, đối chiếu số lượng products, inventory, stock transactions, debts và journal entries so với database gốc.
 5. Test riêng các giao dịch thu/chi liên quan sổ cái, kết quả rollback khi lỗi. Chỉ bật `ENABLE_POSTGRES_WRITES=true` sau kiểm nghiệm staging.
-6. Kiểm tra API 501 để biết những nghiệp vụ chưa hoàn thành. **Không merge deploy production khi API nhập/xuất kho hoặc webshop order mutation còn 501.**
+6. Kiểm tra API 501 để biết những nghiệp vụ chưa hoàn thành. **Không merge deploy production khi nhập/xuất kho chưa kiểm thử thực tế hoặc API webshop order mutation còn 501.**
 
 ## Kiểm thử tự động
 
@@ -38,6 +40,9 @@ npm install
 npm run test:security
 npm run test:api
 npm run test:payment
+npm run test:stock
+npm run test:password
+npm run test:netlify
 npm run build:api:check
 npm run build
 ```
