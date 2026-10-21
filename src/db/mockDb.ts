@@ -31,6 +31,7 @@ import {
   WebshopOrderItem,
   WebshopProductConfig,
   WebshopStoreConfig,
+  WebshopCustomerAccount,
   WebshopOrderStatus,
   WebshopPaymentMethod,
   WebshopPaymentStatus,
@@ -99,6 +100,8 @@ export class MockDatabase {
   quotations: Quotation[] = [];
   quotationDetails: QuotationDetail[] = [];
   webshopOrders: WebshopOrder[] = [];
+  /** Customer accounts have no backend persistence yet. Never fabricate sessions locally. */
+  webshopCustomerAccounts: WebshopCustomerAccount[] = [];
   webshopProductConfigs: WebshopProductConfig[] = [];
   fiscalClosings: FiscalYearClosing[] = [];
   webshopStoreConfig: WebshopStoreConfig = {
@@ -1193,6 +1196,40 @@ export class MockDatabase {
     }
   }
 
+  // Safety boundary: storefront account mutations must go through a persistent
+  // authenticated backend. These APIs fail explicitly until that migration exists.
+  getCurrentWebshopCustomer(): WebshopCustomerAccount | null { return null; }
+
+  loginWebshopCustomer(_username: string, _password: string): { success: boolean; account?: WebshopCustomerAccount; message: string } {
+    return { success: false, message: 'Tài khoản Webshop chưa được kết nối với Supabase. Đăng nhập đang tạm khóa.' };
+  }
+
+  registerWebshopCustomer(_input: {
+    username: string; email: string; phone: string; fullName: string; address: string; password: string
+  }): { success: boolean; account?: WebshopCustomerAccount; message: string } {
+    return { success: false, message: 'Đăng ký Webshop tạm khóa cho đến khi backend Supabase được triển khai.' };
+  }
+
+  logoutWebshopCustomer(): void { /* no local customer session exists */ }
+
+  toggleWishlistProduct(_productId: string): { success: boolean; message: string } {
+    return { success: false, message: 'Yêu thích sản phẩm cần tài khoản Webshop lưu trên Supabase.' };
+  }
+
+  updateWebshopCustomerProfile(_id: string, _patch: Partial<WebshopCustomerAccount>): {
+    success: boolean; account?: WebshopCustomerAccount; message: string
+  } {
+    return { success: false, message: 'Chưa hỗ trợ cập nhật tài khoản Webshop qua PostgreSQL.' };
+  }
+
+  deleteWebshopCustomer(_id: string): { success: boolean; message: string } {
+    return { success: false, message: 'Xóa tài khoản Webshop yêu cầu API Supabase có kiểm tra quyền.' };
+  }
+
+  resetWebshopCustomerPassword(_id: string, _password: string): { success: boolean; message: string } {
+    return { success: false, message: 'Đặt lại mật khẩu Webshop yêu cầu backend xác thực.' };
+  }
+
   createWebshopOrder(input: {
     customerName: string;
     customerPhone: string;
@@ -1202,6 +1239,7 @@ export class MockDatabase {
     shippingMethod?: 'STANDARD' | 'EXPRESS' | 'STORE_PICKUP';
     paymentMethod: WebshopPaymentMethod;
     paymentStatus?: WebshopPaymentStatus;
+    accountId?: string;
     items: {
       productId: string;
       qty: number;
