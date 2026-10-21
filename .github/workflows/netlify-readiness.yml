@@ -36,3 +36,33 @@ jobs:
         run: npm run build
       - name: Check TypeScript
         run: npm run lint
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: kho_ci
+          POSTGRES_USER: ci_user
+          POSTGRES_PASSWORD: ci_password_for_local_runner_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_user -d kho_ci"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci_user:ci_password_for_local_runner_only@127.0.0.1:5432/kho_ci?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies and generate Prisma Client
+        run: npm install --no-audit --no-fund
+      - name: Push schema ONLY to disposable CI PostgreSQL
+        run: npx prisma db push --skip-generate
+      - name: Run real PostgreSQL integration tests
+        run: npm run test:postgres:integration
