@@ -317,6 +317,7 @@ app.post('/api/auth/logout', (c) => {
 const handlePasswordChange = async (c: any) => {
   try {
     const body = await c.req.json();
+    const { oldPassword, newPassword } = body;
     const userId = c.req.param('id') || body.userId || c.get('authenticatedUserId' as never);
     if (String(userId) !== String(c.get('authenticatedUserId' as never)) && c.get('authenticatedRole' as never) !== 'ADMIN') {
       return c.json({ success: false, error: 'Không được đổi mật khẩu tài khoản khác' }, 403);
@@ -324,7 +325,7 @@ const handlePasswordChange = async (c: any) => {
     if (!oldPassword && c.get('authenticatedRole' as never) !== 'ADMIN') {
       return c.json({ success: false, error: 'Yêu cầu mật khẩu hiện tại' }, 400);
     }
-    const { oldPassword, newPassword } = body;
+
 
     if (!userId || !newPassword) {
       return c.json({ success: false, error: 'Vui lòng cung cấp mật khẩu mới' }, 400);
