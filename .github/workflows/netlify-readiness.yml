@@ -22,6 +22,8 @@ jobs:
         run: npm run test:security
       - name: Test Netlify PostgreSQL API boundaries
         run: npm run test:api
+      - name: Verify PostgreSQL payment integrity
+        run: npm run test:payment
       - name: Compile Netlify API entry
         run: npm run build:api:check
       - name: Build frontend
