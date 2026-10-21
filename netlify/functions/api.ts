@@ -1,62 +1,55 @@
-import { app } from '../../src/server/app';
+/**
+ * Netlify deployment gate.
+ * The core Hono routes still depend on Cloudflare D1. Do not silently use
+ * ephemeral Node SQLite for financial/inventory records in serverless runtime.
+ * Until the transactional business endpoints are migrated to PostgreSQL,
+ * only read-only readiness endpoints are enabled.
+ */
+import { testPostgresConnection } from '../../src/server/services/postgresService';
 
-const getEventUrl = (event) => {
-  const host = event.headers?.host || 'localhost';
-  const path = event.path || '/';
-  const protocol = event.headers?.['x-forwarded-proto'] || 'https';
-  const query = event.queryStringParameters && Object.keys(event.queryStringParameters).length
-    ? `?${new URLSearchParams(event.queryStringParameters).toString()}`
-    : '';
+export const handler = async (event: any) => {
+  const method = event.httpMethod || 'GET';
+  const originalPath = String(event.path || '');
+  const forwardedPath = event.queryStringParameters?.path || '';
+  const path = forwardedPath
+    ? '/api/' + String(forwardedPath).replace(/^\/+/, '')
+    : originalPath.startsWith('/.netlify/functions/api/')
+      ? '/api/' + originalPath.slice('/.netlify/functions/api/'.length)
+      : originalPath;
 
-  return `${protocol}://${host}${path}${query}`;
-};
+  const json = (statusCode: number, result: Record<string, unknown>) => ({
+    statusCode,
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+    body: JSON.stringify(result),
+  });
 
-export const handler = async (event) => {
-  try {
-    const url = getEventUrl(event);
-    const method = event.httpMethod || 'GET';
-    const headers = new Headers(event.headers || {});
-
-    let body;
-    if (event.body && !['GET', 'HEAD'].includes(method)) {
-      body = event.isBase64Encoded ? Buffer.from(event.body, 'base64') : event.body;
-    }
-
-    const request = new Request(url, {
-      method,
-      headers,
-      body,
-      duplex: 'half',
+  if (method === 'GET' && path === '/api/health') {
+    return json(200, {
+      status: 'limited', framework: 'Netlify Functions',
+      database: 'PostgreSQL migration required for transactional API',
+      readyForProduction: false,
     });
-
-    const response = await app.fetch(request, {
-      ...process.env,
-      NODE_ENV: process.env.NODE_ENV || 'production',
-    });
-
-    const responseHeaders = Object.fromEntries(response.headers.entries());
-    return {
-      statusCode: response.status,
-      headers: responseHeaders,
-      body: await response.text(),
-      isBase64Encoded: false,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unexpected Netlify API error';
-    return {
-      statusCode: 500,
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-      },
-      body: JSON.stringify({
-        success: false,
-        connected: false,
-        error: message,
-      }),
-      isBase64Encoded: false,
-    };
   }
+
+  if (method === 'GET' && path === '/api/db/status') {
+    const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+    if (!connectionString) return json(503, { connected: false, error: 'DATABASE_URL not configured' });
+    try {
+      await testPostgresConnection({ connectionString, ssl: true });
+      return json(200, {
+        connected: true,
+        engine: 'supabase',
+        message: 'PostgreSQL connection verified. ERP business API migration is still required.',
+        businessApiReady: false,
+      });
+    } catch {
+      return json(503, { connected: false, error: 'PostgreSQL connection failed; inspect server logs.' });
+    }
+  }
+
+  return json(503, {
+    success: false,
+    error: 'Business API temporarily disabled on Netlify: Cloudflare D1 routes have not been migrated to Supabase PostgreSQL.',
+    code: 'POSTGRES_API_MIGRATION_REQUIRED',
+  });
 };
