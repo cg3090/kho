@@ -247,7 +247,10 @@ export default function App() {
     return (
       <Login
         db={db}
-        onLoginSuccess={forceUpdate}
+        onLoginSuccess={() => {
+          setSyncStatus('synced');
+          forceUpdate();
+        }}
         onBackToShop={handleSwitchToShop}
       />
     );
