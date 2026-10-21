@@ -55,6 +55,7 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit): P
  * Internal check for server auth mode
  */
 function checkServerAuth(): boolean {
+  if (import.meta.env.PROD) return true;
   if (typeof window === 'undefined') return false;
   try {
     return Boolean(getAuthToken());
@@ -350,6 +351,9 @@ export async function serverChangePassword(
     // ignore
   }
 
+  // Never claim a server password change succeeded when hosted API rejects it.
+  if (import.meta.env.PROD) return { success: false, error: 'Không thể đổi mật khẩu trên máy chủ; dữ liệu chưa thay đổi.' };
+
   // Local storage / fallback update
   try {
     const updatedUser = updateCachedUserPassword(userId, newPassword);
@@ -528,7 +532,7 @@ export async function initAuth(
     }
   }
 
-  if (!user) {
+  if (!user && !import.meta.env.PROD) {
     try {
       const cached = localStorage.getItem(AUTH_USER_KEY) || localStorage.getItem('wms_currentUser');
       if (cached) {
