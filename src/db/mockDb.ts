@@ -190,6 +190,15 @@ export class MockDatabase {
   }
 
   constructor() {
+    if (import.meta.env.PROD) {
+      // In hosted mode all organization/shop identity must come from PostgreSQL.
+      this.companyInfo = { name: '', taxCode: '', address: '', bankAccount: '', bankName: '', logoUrl: '' };
+      this.webshopStoreConfig = {
+        storeName: '', storeSlogan: '', hotline: '', email: '', address: '',
+        defaultWarehouseId: '', autoCreateStockOut: false, allowOrderWhenOutOfStock: false,
+        bankName: '', bankAccount: '', bankOwner: '',
+      };
+    }
     if (!import.meta.env.PROD) this.loadFromStorage();
     // Never auto-seed mock business data in constructor; strip any residual mock records
     this.purgeMockRecords();
