@@ -27,6 +27,16 @@ export const database = () => {
   return prisma;
 };
 
+const requiredTables = ['users', 'roles', 'products', 'inventory_stock', 'erp_collections', 'stock_transactions', 'debts', 'payments', 'journal_entries', 'journal_entry_lines'];
+async function inspectSchema(db: PrismaClient) {
+  const rows = await db.$queryRaw<{ table_name: string }[]>`
+    SELECT table_name FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+  `;
+  const found = new Set(rows.map(row => row.table_name));
+  return { tableCount: rows.length, missingTables: requiredTables.filter(name => !found.has(name)) };
+}
+
 const safeUser = (u: any) => ({
   id: u.id, username: u.username, fullName: u.fullName,
   email: u.email || '', phone: u.phone || '',
@@ -95,15 +105,14 @@ api.post('/api/auth/logout', (c) => c.json({ success: true }));
 api.get('/api/db/status', async (c) => {
   try {
     await database().$queryRaw`SELECT 1`;
-    const count = await database().$queryRaw<{ count: bigint }[]>`
-      SELECT count(*)::bigint AS count FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-    `;
+    const schema = await inspectSchema(database());
     return c.json({
-      connected: true, success: true, engine: 'supabase',
-      driver: 'postgresql', database: 'PostgreSQL',
-      tableCount: Number(count[0]?.count || 0),
+      connected: true, success: schema.missingTables.length === 0,
+      schemaReady: schema.missingTables.length === 0,
+      engine: 'supabase', driver: 'postgresql', database: 'PostgreSQL',
+      tableCount: schema.tableCount, missingTables: schema.missingTables,
       businessMutationsEnabled: writesEnabled(),
+      supportedWriteRoutes: writesEnabled() ? ['/api/payments', '/api/db/collection/:key (selected catalogs)'] : [],
     });
   } catch (error) {
     console.error('PostgreSQL health check failed', error);
@@ -113,6 +122,10 @@ api.get('/api/db/status', async (c) => {
 
 api.get('/api/db/state', async (c) => {
   try {
+    const schema = await inspectSchema(database());
+    if (schema.missingTables.length) {
+      return c.json({ success: false, error: 'Thiếu bảng ERP bắt buộc trên PostgreSQL', missingTables: schema.missingTables }, 503);
+    }
     const state = await loadFullStateViaPrisma(database());
     // Password hashes, connection strings and auth secrets must never leak into the browser.
     if (Array.isArray(state.users)) state.users = state.users.map(safeUser);
